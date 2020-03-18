@@ -2,7 +2,7 @@ from pylayout.math import Transform, Transformed, AABB, degrees, radians
 from pylayout.utils import isnumeric, direction_angle, unique_name_for
 from pylayout.builder import ComponentBuilder
 from pylayout.process import ProcessLayer, DesignRules
-from pylayout.routing import Port, Router
+from pylayout.routing import Port, Connection
 from pylayout.shapes import SimplePolygon, Path, FlexPath, RobustPath, Text
 
 import gdspy
@@ -60,6 +60,12 @@ class ComponentLibrary:
         if not key in self._components:
             raise KeyError("Component '%s' not found in library!" % key)
         del self._components[key]
+
+    def __iter__(self):
+        return iter(self._components)
+
+    def __len__(self):
+        return len(self._components)
 
     def add(self, name, component: Component):
         if not isinstance(component, Component):
@@ -153,9 +159,10 @@ class ComponentReference:
     ComponentVariants).
     """
 
-    __slots__ = ("cell", "ports")
+    __slots__ = ("name", "cell", "ports")
 
-    def __init__(self, comp: Component, local: Transform):
+    def __init__(self, name: str, comp: Component, local: Transform):
+        self.name = name
         self.cell = gdspy.CellReference(
             comp.cell, 
             local.translation, 
@@ -190,12 +197,15 @@ class ComponentReference:
 
 
 class ComponentArray:
+    """ Defines a proxy array combining a component reference and a transform in the parent layout """
 
-    __slots__ = ("cell", "ports")
-
-    def __init__(self, rows, cols, comp: Component, local: Transform, padding=0):
+    __slots__ = ("name", "cell", "ports")
+        
+    def __init__(self, rows, cols, name: str, comp: Component, local: Transform, padding=0):
         assert cols > 0
         assert rows > 0
+        self.name = name
+
         if isnumeric(padding):
             padding = (padding, padding)
 
@@ -258,54 +268,97 @@ class Layout:
     connections. It is possible to place sub layouts within a layout and thus build a hierarchy
     of cells from component definitions to device layout to system layout.
     """
-    def __init__(self, name, gdslib=None, unit=1e-6, precision=1e-9):
+    def __init__(self, name, lib=None, unit=1e-6, precision=1e-9):
+        """
+        input:
+            name - str, a allow_duplicates name for this layout
+            lib - ComponentLibrary, shared component library or None to create a new one
+            unit, precision - number, snap all layout elements to the grid defined by grid=(precision/unit)
+        """
         self.cell = gdspy.Cell(name)
+        self._name = name
         
-        if gdslib is None:
-            gdslib = gdspy.GdsLibrary(name, None, unit, precision)
+        if lib is None:
+            lib = ComponentLibrary(unit=unit, precision=precision)
 
-        self._gdslib = gdslib
-        self._unit = gdslib.unit
-        self._precision = gdslib.precision
-        self._gdslib.add(self.cell)     # add self to lib as top cell
+        self._lib = lib
+        self._unit = lib.unit
+        self._precision = lib.precision
 
+        self._layouts = dict()          # dictionary of placed sub layouts
         self._references = dict()       # dictionary of placed components
-        self.connections = list()       # lisr of connections between ports
+        self._connections = list()      # list of connections between ports
 
     @property
     def components(self): return self._references
+    
+    @property
+    def layouts(self): return self._layouts
 
     def get_bounds(self):
         return AABB(self.cell.get_bounding_box())
 
-    def sub_layout(self, name, layout, origin=(0,0), orientation='e', scale=1.0, flipV=False, allow_multiple=False):
+    def place_layout(self, layout, origin=(0,0), orientation='e', scalefactor=1.0, flipV=False, allow_duplicates=False):
+        """ insert a layout into this layout at coordinates given by origin 
+        
+        input:
+            layout - Layout, the layout instance to be inserted
+            allow_duplicates - bool, if false, allow inserting multiple copies of the same layout generating a allow_duplicates name for them
+
+        output:
+            name of the inserted layout (same if allow_duplicates or generated name if a copy)
+        """
+        self._gdslib.add(layout.cell, True, not allow_duplicates, True)
+
         if not isinstance(item, Layout):
             raise ValueError('Invalid argument supplied to sub_layout(), must be a Layout instance!')
 
-        if isnumeric(scale):
-            scale = (scale, scale)
+        if isnumeric(scalefactor):
+            scalefactor = (scalefactor, scalefactor)
         if flipV:
-            scale[1] = -scale[1]
+            scalefactor[1] = -scalefactor[1]
 
-        self._gdslib.add(layout.cell, True, not allow_multiple, True)
+        if layout._name == self._name:
+            raise ValueError("Cannot add sub layout with the same name as this layout!")
+
+        name = layout._name
+        if name in self._layouts:
+            if not allow_duplicates:
+                raise ValueError("A sub layout by the name '%s' already exists in the layout '%'", (name, self._name))
+            name = unique_name_for(name, self._layouts)
+
+        self._layouts[name] = layout
+
         self.cell.add(gdspy.CellReference(layout.cell, 
             origin,
             direction_angle(orientation),
-            scale[1],
-            x_reflection = scale[0] < 0))
+            scalefactor[1],
+            x_reflection = scalefactor[0] < 0))
 
-    def _place(self, name, item, origin=(0,0), orientation='e', scale=1.0, flipV=False, allow_multiple=False, **kwargs):
+        return name
+
+    def _place(self, name, item, origin=(0,0), orientation='e', scalefactor=1.0, flipV=False, params={}, allow_duplicates=False):
+
+        if name == self._name:
+            raise ValueError("Cannot place a component with the same name as the layout name!")
+        
         if name in self._references:
-            if not allow_multiple:
+            if not allow_duplicates:
                 raise ValueError("A component with the name '%s' already exists on the layout!" % name)
             name = unique_name_for(name, self._references)
 
         if isinstance(item, Component):
             comp = item
+
+        if isinstance(item, str):
+            if not item in self._lib:
+                raise ValueError("Component name '%s' not found in layout's component library!" % item)
+            comp = self._lib[item]
+
         else:
 
             if inspect.isclass(item):
-                item = item(**kwargs)
+                item = item(**params)
             
             if not isinstance(item, ComponentBuilder):
                 raise ValueError('Invalid argument supplied to place(), item must be a component instance or a builder!')
@@ -313,63 +366,78 @@ class Layout:
             comp = self._builer_to_cell(item)
 
         local = Transform(
-            scale, 
+            scalefactor, 
             radians(direction_angle(orientation)), 
             origin, 
             self._unit, 
             self._precision)
         if flipV:
             local.flipV()
-
-        self._gdslib.add(comp.cell)
         
         return (name, comp, local)
 
-    def place(self, name, item, origin=(0,0), orientation='e', scale=1.0, flipV=False, allow_multiple=False, **kwargs):
+    def place(self, name, item, origin=(0,0), orientation='e', scalefactor=1.0, flipV=False, params={}, allow_duplicates=False):
 
-        (name, comp, local) = self._place(name, item, origin, orientation, scale, flipV, allow_multiple, **kwargs)
+        (name, comp, local) = self._place(name, item, origin, orientation, scalefactor, flipV, params, allow_duplicates)
 
-        reference = ComponentReference(comp, local)
+        reference = ComponentReference(name, comp, local)
         self.cell.add(reference.cell)
         self._references[name] = reference
 
         return reference
 
-    def place_array(self, name, item, rows, cols, padding=0, origin=(0,0), orientation='e', scale=1.0, flipV=False, allow_multiple=False, **kwargs):
+    def array(self, name, item, rows, cols, padding=0, origin=(0,0), orientation='e', scalefactor=1.0, flipV=False, params={}, allow_duplicates=False):
         
-        (name, comp, local) = self._place(name, item, origin, orientation, scale, flipV, allow_multiple, **kwargs)
+        (name, comp, local) = self._place(name, item, origin, orientation, scalefactor, flipV, params, allow_duplicates)
 
-        reference = ComponentArray(rows, cols, comp, local, padding)
-        reference.cell.ref_cell.name = name
+        reference = ComponentArray(rows, cols, name, comp, local, padding)
         self.cell.add(reference.cell)
         self._references[name] = reference
 
         return reference
 
-    # def place_variants(self, name, item, spacing, vertical=False, **kwargs):
-    #     # TODO: create cell instances for each item variation and add them to a parent cell and place that!
-    #     pass
+    def _port(self, port):
+        if isinstance(port, PortReference):
+            return port
+        elif isinstance(port, ComponentReference):
+            return self.get_port(port.name)
+        elif isinstance(port, str):
+            return self.get_port(port)
+        elif isinstance(port, Component):
+            raise ValueError("Cannot route a library component! The component must first be place on the layout.")
+        else:
+            raise TypeError("Invalid argument type for port in connect(), got %s" % type(port))
     
-    def connect(self, port1_id, port2_id, bend_radius=1):
-        port1 = self.get_port(port1_id)
-        port2 = self.get_port(port2_id)
+    def connect(self, port1, port2, bend_radius=1):
+        """ connect two ports to create a route 
 
-        if port1.width != port2.width:
-            raise ValueError("Cannot connect ports '%s' and '%s' with different width" % (port1_id, port2_id))
+        input:
+            port1, port2 - PortRef, ComponentReference or string of the form '<component_name> ([<row>]) ([<col>]) (.<port_name>)'
+            Note: if a ComponentReference is passed, or a component_name alone is given, the function checks to see if the 
+            component has only a single port, and if so, uses that one, otherwise raises an error to require more identification.
+        """
+        _port1 = self._port(port1)
+        _port2 = self._port(port2)
 
-        router = Router(port1, port2, self._unit, self._precision)
+        if _port1.width != _port2.width:
+            raise ValueError("Cannot connect ports '%s' and '%s' with different width" % (_port1, _port2))
+
+        connection = Connection(_port1, _port2, self._unit, self._precision)
         
-        self.connections.append(router)
+        self._connections.append(connection)
 
-        return router
+        return connection
 
-    def get_component(self, name):
+    def get_component(self, name: str) -> Component:
+        """ get placed component by name """
         if not name in self._references:
-            raise KeyError("Component '%s' not found in current layout!" % name)
+            raise KeyError("Component '%s' not found in layout '%s'" % (name, self._name))
         return self._references[name]
         
-    def get_port(self, identifier):
+    def get_port(self, identifier: str) -> Port:
+        """ get placed component port by name identifier """
         import re
+
         match = re.fullmatch('(\w+)(?:\[(\d+)\])?(?:\[(\d+)\])?(?:\.(\w+))?', identifier)
         if match is None:
             raise ValueError('Invalid port identifier string!')
@@ -378,7 +446,7 @@ class Layout:
         
         comp_name = groups[0]
         if not comp_name in self._references:
-            raise KeyError("Component '%s' not found in current layout!" % comp_name)
+            raise KeyError("Component '%s' not found in layout '%s'" % (comp_name, self._name))
 
         component = self._references[comp_name]
 
@@ -435,54 +503,65 @@ class Layout:
     def _builer_to_cell(self, builder: ComponentBuilder):
         import gdspy
 
-        cell = gdspy.Cell(unique_name_for(repr(builder), self._gdslib.cells))
+        name = repr(builder)
 
-        for layer, shape in builder.shapes:
-            if isinstance(shape, (SimplePolygon, FlexPath, RobustPath)):
-                cell.add(gdspy.Polygon(shape.get_points(self._unit, self._precision), layer.layer, layer.dtype))
-            
-            elif isinstance(shape, Path):
-                if shape.gds_path:
-                    cell.add(gdspy.FlexPath(
-                        shape.get_points(self._unit, self._precision),
-                        shape.width,
-                        precision=self._precision/self._unit,
-                        gdsii_path=True, 
-                        layer=layer.layer,
-                        datatype=layer.dtype))
-                else:
-                    cell.add(gdspy.Polygon(
-                        shape.get_points(self._unit, self._precision), 
-                        layer.layer, 
-                        layer.dtype))
+        if name in self._lib:
+            return self._lib[name]
 
-            elif isinstance(shape, Text):
-                if shape.polygonal:
-                    cell.add(gdspy.Text(
-                        shape.text, 
-                        shape.size, 
-                        shape.position, 
-                        True, 
-                        degrees(shape.rotation), 
-                        layer.layer, 
-                        layer.dtype))
-                else:
-                    cell.add(gdspy.Label(
-                        shape.text, 
-                        shape.position,
-                        shape.anchor, 
-                        degrees(shape.rotation), 
-                        shape.size, 
-                        False,
-                        layer.layer,
-                        layer.dtype))
+        else:
+            cell = gdspy.Cell(name)
 
-        return Component(cell, builder.ports)
+            for layer, shape in builder.shapes:
+                if isinstance(shape, (SimplePolygon, FlexPath, RobustPath)):
+                    cell.add(gdspy.Polygon(shape.get_points(self._unit, self._precision), layer.layer, layer.dtype))
+                
+                elif isinstance(shape, Path):
+                    if shape.gds_path:
+                        cell.add(gdspy.FlexPath(
+                            shape.get_points(self._unit, self._precision),
+                            shape.width,
+                            precision=self._precision/self._unit,
+                            gdsii_path=True, 
+                            layer=layer.layer,
+                            datatype=layer.dtype))
+                    else:
+                        cell.add(gdspy.Polygon(
+                            shape.get_points(self._unit, self._precision), 
+                            layer.layer, 
+                            layer.dtype))
+
+                elif isinstance(shape, Text):
+                    if shape.polygonal:
+                        cell.add(gdspy.Text(
+                            shape.text, 
+                            shape.size, 
+                            shape.position, 
+                            True, 
+                            degrees(shape.rotation), 
+                            layer.layer, 
+                            layer.dtype))
+                    else:
+                        cell.add(gdspy.Label(
+                            shape.text, 
+                            shape.position,
+                            shape.anchor, 
+                            degrees(shape.rotation), 
+                            shape.size, 
+                            False,
+                            layer.layer,
+                            layer.dtype))
+
+            c = Component(cell, builder.ports)
+            self._lib.add(name, c)
+            return c
 
     def save(self, filename):
         """ export layout to GDSII file """
         from os.path import realpath
 
+        lib = gdspy.GdsLibrary(self._name, unit=self._unit, precision=self._precision)
+        lib.add(self.cell, True, False, True)
+
         filename = realpath(filename)
         with open(filename, 'wb') as outfile:
-            self._gdslib.write_gds(outfile)
+            lib.write_gds(outfile)

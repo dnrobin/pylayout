@@ -96,9 +96,6 @@ class Vec:
     @y.setter
     def y(self, value):
         self._y = round(value, self.__digits)
-    
-    def __len__(self):
-        return 2
 
     def __getitem__(self, key):
         if key < 0 or key > 1 : raise IndexError()
@@ -112,8 +109,12 @@ class Vec:
         if key == 0: self._x = round(value, self.__digits)
         if key == 1: self._y = round(value, self.__digits)
 
-    def __str__(self):
-        return self.__repr__()
+    def __len__(self):
+        return 2
+
+    def __iter__(self):
+        yield self._x
+        yield self._y
     
     def __repr__(self):
         return "({:.4f}, {:.4f})".format(self._x, self._y)
@@ -686,6 +687,9 @@ class QuickPath:
         
         self.__initial_dir = radians(direction_angle(initial_direction))
 
+    def __repr__(self):
+        return repr(self.xy)
+
     def __getitem__(self, idx):
         if isinstance(idx, slice):
             return [self.xy[i] for i in range(idx.start, idx.stop, idx.step)]
@@ -694,18 +698,26 @@ class QuickPath:
         return self.xy[idx]
 
     def __setitem__(self, idx, value):
-        if idx < 0 or idx >= len(self.xy): 
+        if idx < -len(self.xy) or idx >= len(self.xy): 
             raise IndexError("Index %s out of range in path!" % idx)
         if not isvector(value):
             raise ValueError("Invalid type set append path! Must be a vector addressable type.")
         self.xy[idx] = Vec(value)
+
+    def __delitem__(self, idx):
+        if idx < -len(self.xy) or idx >= len(self.xy): 
+            raise IndexError("Index %s out of range in path!" % idx)
+        del self.xy[idx]
     
     def __len__(self):
         return len(self.xy)
 
-    def __delitem__(self, key):
-        if key < 0 or key >= len(self.xy) : raise IndexError()
-        del self.xy[key]
+    def __add__(self, other):
+        if not isinstance(other, QuickPath):
+            raise ValueError("Invalid operand type for '-', expecting QuickPath!")
+        qp = QuickPath(self)
+        qp.extend(other)
+        return qp
 
     @property
     def x(self):
@@ -731,8 +743,11 @@ class QuickPath:
         self.xy.reverse()
         return self
 
-    def clean(self, tolerance=1e-3):
+    def clean(self, tolerance=None):
         """ remove any overlapping points within the tolerance radius """
+        if tolerance is None:
+            tolerance = self.__precision / self.__unit
+        
         for i, p in enumerate(self.xy):
             if self.xy[i].near(self.xy[i-1], tolerance):
                 del self.xy[i-1]

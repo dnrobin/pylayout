@@ -28,9 +28,9 @@ class DesignRules:
 
         # default rules
         self.add_rule('GRID', True, 'Require vertices to be snapped to grid coordinates')
-        self.add_rule('MIN_WIDTH', .18, 'Minimum element width')
-        self.add_rule('MIN_SPACE', .20, 'Minimum spacing around element')
-        self.add_rule('MIN_SPACE_DT', 1.0, 'Minimum sopacing to nearest deep trench')
+        self.add_rule('MIN_WIDTH', .1, 'Minimum element width')
+        self.add_rule('MIN_SPACE', .2, 'Minimum spacing around element')
+        self.add_rule('MIN_SPACE_DT', 1, 'Minimum sopacing to nearest deep trench')
         self.add_rule('MIN_DENSITY', .2, 'Minimum material density ratio')
         self.add_rule('MAX_DENSITY', .7, 'Maximum material density ratio')
         

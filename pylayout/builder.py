@@ -28,30 +28,12 @@ class ComponentBuilder(ParameterContainer):
         self.rebuild()
         
     def __repr__(self):
+        return self.unique_name()
+
+    def unique_name(self):
         return self.__class__.__name__ + super().__repr__()
 
     def build(self): ...
-
-    def on_clear(sefl):
-        pass
-
-    def before_build(self):
-        pass
-
-    def after_build(self):
-        pass
-
-    def before_insert(self):
-        pass
-
-    def after_insert(self):
-        pass
-
-    def before_port_define(self):
-        pass
-
-    def after_port_define(self):
-        pass
 
     def rebuild(self):
         self.clear()
@@ -99,9 +81,48 @@ class ComponentBuilder(ParameterContainer):
         
         self.after_port_define()
 
+    #
+    # Lifecycle hooks
+    #
+
+    def on_clear(self):
+        pass
+
+    def before_build(self):
+        pass
+
+    def after_build(self):
+        pass
+
+    def before_insert(self):
+        pass
+
+    def after_insert(self):
+        pass
+
+    def before_port_define(self):
+        pass
+
+    def after_port_define(self):
+        pass
+
 
 class Waveguide(ComponentBuilder):
-    """ Waveguide Blueprint - defines a parametric waveguide and interpolates over route path """
+    """ Defines a parametric waveguide builder that smoothly interpolates a path to generate multilayer traces
+    
+    input:
+        template     - (require) TraceTemplate, Waveguide layer template used when interpolating path
+        points       - (require) list, Points defining the waveguide path to interpolate
+        width        - (require) number, Waveguide core width
+        radius       - (require) number, Radius used when creating bends of any kind
+        bezier       - number, Method for cunstructing bends along the waveguide
+        tolerance    - number, Tolerance for bend interpolation defines the mesh precision
+        precision    - number, Unit precisision to snap points to
+        augmented    - boolean, Automatically taper segments to wide sections when long enough
+        aug_width    - number, Width of wide sections when tapers option is true
+        aug_template - TraceTemplate, If a layer template is provided, use it instead of fixed width
+        taper_length - number, Length of tapers when tapers option is true
+    """
 
     template    = ComponentParameter(type=TraceTemplate, required=True, description='Waveguide layer template used when interpolating path.')
     points      = ComponentParameter(type=list, required=True, description='Points defining the waveguide path to interpolate.')
@@ -115,6 +136,17 @@ class Waveguide(ComponentBuilder):
     aug_template = ComponentParameter(False, description='If a layer template is provided, use it instead of fixed width.')
     taper_length = ComponentParameter(10, description='Length of tapers when tapers option is true.')
 
+    def unique_name(self):
+        return ''.join(['Waveguide('
+            "template=%s, "       % self.template,
+            "width=%s, "          % self.width,
+            "radius=%s, "         % self.radius,
+            "bezier=%s, "         % self.bezier,
+            "augmented=%s, "      % self.augmented,
+            "start=(%.1f,%.1f), " % tuple(self.points[0]) ,
+            "end=(%.1f,%.1f)"     % tuple(self.points[-1]),
+            ')'])
+
     def build(self):
         for i in range(1, len(self.points)-1):
             (x1, y1), (x2, y2), (x3, y3) = self.points[i-1], self.points[i], self.points[i+1]
@@ -122,9 +154,10 @@ class Waveguide(ComponentBuilder):
                 print('Warning: the angle at the corner {} is less than 90 degrees!'.format(self.points[i]))
 
         tpl_layer_names = set(self.template.spec.keys())
-        tpr_layer_names = set(self.aug_template.spec.keys())
-
+        tpr_layer_names = set()
+        
         if self.aug_template:
+            tpr_layer_names = set(self.aug_template.spec.keys())
             if not tpl_layer_names <= tpr_layer_names:
                 raise ValueError("Taper template must contain the same layers as the waveguide template!")
 
@@ -249,20 +282,19 @@ class Waveguide(ComponentBuilder):
                 v2 = p3 - p2
 
                 if _corner:
-                    if v1.length() - 2*radius <= 0:
+                    if v1.length() - 2*radius < 0:
                         raise Exception("Distance between consecutive corners is too short to accomodate bend radius at {}".format(p2))
                 
                 if v1.length() - radius <= 0:
                     raise Exception("Segment length is too short to accomodate bend radius at corner {}".format(p2))
 
-                # NOTE: assuming the upcoming point p3 is not a corner (it will be checked anyway in the next iteration)
+                # NOTE: assuming the upcoming point p3 is NOT a corner (it will be checked anyway in the next iteration)
                 if v2.length() - radius <= 0:
                     raise Exception("Segment length is too short to accomodate bend radius at corner {}".format(p2))
 
                 _make_bend(path, p1, p2, p3, width, radius, bezier)
 
-                # reset _taper to false as we never instert tapers in the p3-p2 segment!
-                _taper = False
+                _taper = False  # reset _taper to false as we never instert tapers in the p2-p3 segment when doing corners!
                 _corner = True
                 
             i += 1
