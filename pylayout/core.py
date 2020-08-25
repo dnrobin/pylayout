@@ -1,6 +1,39 @@
-from pylayout.utils import get_lambda_expr, isnumeric
+from pylayout.utils import isnumber
 
 import copy
+import warnings
+
+def get_lambda_expr(l):
+    """ extract expression string from lambda function """
+    import re, inspect
+    s = inspect.getsource(l)
+    i = s.find('lambda')
+    j = re.search(':[^,)]*', s[i:]).span()
+    return s[i+j[0]+1:i+j[1]].strip()
+
+
+class PylayoutNotice(Warning):
+    def __init__(self, message):
+        self.args = ("(pylayout) Notice: %s" % message,)
+
+class PylayoutWarning(Warning):
+    def __init__(self, message):
+        self.args = ("(pylayout) Warning: %s" % message,)
+
+class PylayoutException(Warning):
+    def __init__(self, message):
+        self.args = ("(pylayout) Exception: %s" % message,)
+
+
+def _pylayout_notice(message):
+    warnings.warn(message, PylayoutNotice, stacklevel=2)
+
+def _pylayout_warning(message):
+    warnings.warn(message, PylayoutWarning, stacklevel=2)
+
+def _pylayout_exception(message):
+    warnings.warn(message, PylayoutException, stacklevel=2)
+
 
 class Parameter(property):
     __slots__ = ('name', 'value', 'default', 'description', 'readonly', 'validate', 'required', 'type')
@@ -66,7 +99,7 @@ class ParameterContainer(metaclass=_ParameterContainerMeta):
                     raise AttributeError("Required parameter '%s' not initialized!" % key)
     
     def __repr__(self):
-        p = { k: v for k, v in self._values.items() if isnumeric(v) or (type(v) is str) }
+        p = { k: v for k, v in self._values.items() if isnumber(v) or (type(v) is str) }
         if len(p) > 0:
             return '(' + ', '.join(["%s=%s" % (k,v) for k, v in p.items()]) + ')'
         return None

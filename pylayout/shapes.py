@@ -1,7 +1,20 @@
-from pylayout.math import Vec, Transformed, QuickPath
+from pylayout.utils import isnumber
+from pylayout.math import (
+    pi,
+    wrap,
+    radians,
+    degrees,
+    sin,
+    cos,
+    atan2,
+    sqrt,
+    sgn,
+    direction_angle,
+    Vec,
+    Transformed)
 
-import gdspy
 from copy import deepcopy
+import gdspy
 
 
 class Shape(Transformed):
@@ -95,157 +108,237 @@ class Text(Shape):
 
 
 class Path(Shape):
-    """ Path - a simple constant width path with QuickPath implementation """
-    def __init__(self, width=1.0, initial_point=(0,0), initial_direction='e', gds_path=False, unit=1, precision=1e-9, **kwargs):
+    """ Path - parametric path shape with a similar API to pylayout.QuickPath """
+    def __init__(self, initial_point, width=1.0, offset=0.0, initial_direction='e', tolerance=0.01, gds_path=False, unit=1, precision=1e-9, **kwargs):
         super().__init__(**kwargs)
-        self.width = width
-        self.gds_path = gds_path
-        self._path = QuickPath(initial_point, initial_direction, unit, precision)
-        self.xy = self._path.xy
+
+        self.__unit = unit
+        self.__precision = precision
+
+        if isnumber(initial_point[0]):
+            initial_point = [initial_point]
+        
+        self._path = gdspy.FlexPath(initial_point, width, offset, tolerance=tolerance, precision=precision/unit, gdsii_path=gds_path)
+        self._update_dir(radians(direction_angle(initial_direction)))
     
+    def __repr__(self):
+        return repr(self._path.points)
+
+    def __len__(self):
+        return len(self._path.points)
+
+    def _update_dir(self, angle=None):
+        if angle is None:
+            n = Vec(Vec(self._path.points[-1]) - Vec(self._path.points[-2])).normalize()
+        else:
+            n = Vec(cos(angle), sin(angle))
+        
+        self._n = n
+        self._t = Vec(-n[1], n[0])   # right hand
+
     @property
-    def x(self): self._path.x
+    def x(self):
+        return self.end()[0]
+
     @property
-    def y(self): self._path.y
-    def remove(self, index): self._path.remove(index)
-    def reverse(self): self._path.reverse()
-    def clean(self, tolerance=1e-3): self._path.clean(tolerance)
-    def trim(self, length): self._path.trim(length)
-    def size(self): self._path.size()
-    def length(self): self._path.length()
-    def distance(self): self._path.distance()
-    def start_direction(self): self._path.start_direction()
-    def end_direction(self): self._path.end_direction()
-    def start(self): self._path.start()
-    def end(self): self._path.end()
-    def points(self): self._path.points()
-    def append(self, point): self._path.append(point)
-    def extend(self, points): self._path.extend(points)
-    def to(self, point): self._path.to(point)
-    def move_by(self, point): self._path.move_by(point)
-    def north(self, d): self._path.north(d)
-    def east(self, d): self._path.east(d)
-    def south(self, d): self._path.south(d)
-    def west(self, d): self._path.west(d)
-    def to_angle(self, d, a): self._path.to_angle(d, a)
-    def forward(self, d): self._path.forward(d)
-    def left(self, d): self._path.left(d)
-    def right(self, d): self._path.right(d)
+    def y(self):
+        return self.end()[1]
+    
+    def length(self):
+        """ total path length obtained by summing each segments """
+        l = 0.0
+        x1, y1 = self._path.points[0]
+        for i in range(1, len(self._path.points)):
+            x2, y2 = self._path.points[i]
+            l += sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+            x1 = x2
+            y1 = y2
+        return l
 
+    def distance(self):
+        """ compute the absolute distance from the starting position to ending position """
+        if len(self._path.points) < 2:
+            return 0.0
+        
+        x1, y1 = self._path.points[0]
+        x2, y2 = self._path.points[-1]
+        return sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
 
-class FlexPath(Shape):
-    def __init__(self, 
-        points, 
-        width, 
-        offset=0, 
-        corners="natural", 
-        bend_radius=None, 
-        tolerance=0.01, 
-        precision=1e-3, 
-        max_points=199, 
-        gdsii_path=False, 
-        width_transform=True, 
-        **kwargs):
+    def start_direction(self):
+        """ compute the first direction along the path (angle in *degrees*) """
+        if len(self._path.points) < 2:
+            return self._n.angle(deg=True)
 
-        super().__init__(**kwargs)
+        x1, y1 = self._path.points[0]
+        x2, y2 = self._path.points[1]
+        angle = atan2(y2 - y1, x2 - x1)
 
-        self._object = gdspy.FlexPath(
-            points,
-            width, 
-            offset,
-            corners,
-            "flush",
-            bend_radius,
-            tolerance,
-            precision,
-            max_points,
-            gdsii_path,
-            width_transform)
+        return degrees(wrap(self._local.rotation + angle))
+    
+    def end_direction(self):
+        """ compute the last direction along the path (angle in *degrees*) """
+        angle = self._n.angle()
+        return degrees(self._local.rotation + angle)
+    
+    def start(self):
+        """ get the start position of the path """
+        return self._local.apply(self._path.points[0], self.__unit, self.__precision)
 
     def end(self):
-        return self._object.points[-1]
-    
-    def arc(self, radius, initial_angle, final_angle, width=None, offset=None):
-        self._object.arc(radius, initial_angle, final_angle, width, offset)
-
-    def area(self):
-        self._object.area()
-
-    def bezier(self, points, width=None, offset=None, relative=True):
-        self._object.bezier(points, width, offset, relative)
-
-    def parametric(self, curve_function, width=None, offset=None, relative=True):
-        self._object.parametric(curve_function, width, offset, relative)
-
-    def segment(self, end_point, width=None, offset=None, relative=False):
-        self._object.segment(end_point, width, offset, relative)
-
-    def smooth(self, points, angles=None, curl_start=1, curl_end=1, t_in=1, t_out=1, cycle=False, width=None, offset=None, relative=True):
-        self._object.smooth(points, angles, curl_start, curl_end, t_in, t_out, cycle, width, offset, relative)
-
-    def turn(self, radius, angle, width=None, offset=None):
-        self._object.turn(radius, angle, width, offset)
+        """ get the end position of the path """
+        return self._local.apply(self._path.points[-1], self.__unit, self.__precision)
 
     def get_points(self, unit=None, precision=None):
-        xy = []
-        for points in self._object.get_polygons():
-            xy.extend(points)
-
-        return self._local.apply(xy, unit, precision)
-
-
-class RobustPath(Shape):
-    def __init__(self,
-        initial_point,
-        width,
-        offset=0,
-        tolerance=0.01,
-        precision=1e-3,
-        max_points=199,
-        max_evals=1000,
-        gdsii_path=False,
-        width_transform=True,
-        **kwargs):
-
-        super().__init__(**kwargs)
-
-        self._object = gdspy.RobustPath(
-            initial_point,
-            width,
-            offset,
-            "flush",
-            tolerance,
-            precision,
-            max_points,
-            max_evals,
-            gdsii_path,
-            width_transform)
-
-    def arc(self, radius, initial_angle, final_angle, width=None, offset=None):
-        self._object.arc(radius, initial_angle, final_angle, width, offset)
-
-    def area(self):
-        self._object.area()
-
-    def bezier(self, points, width=None, offset=None, relative=True):
-        self._object.bezier(points, width, offset, relative)
-
-    def parametric(self, curve_function, width=None, offset=None, relative=True):
-        self._object.parametric(curve_function, width, offset, relative)
-
-    def segment(self, end_point, width=None, offset=None, relative=False):
-        self._object.segment(end_point, width, offset, relative)
-
-    def smooth(self, points, angles=None, curl_start=1, curl_end=1, t_in=1, t_out=1, cycle=False, width=None, offset=None, relative=True):
-        self._object.smooth(points, angles, curl_start, curl_end, t_in, t_out, cycle, width, offset, relative)
-
-    def turn(self, radius, angle, width=None, offset=None):
-        self._object.turn(radius, angle, width, offset)
-
-    def get_points(self, unit=None, precision=None):
-        xy = []
-        for points in self._object.get_polygons():
-            xy.extend(points)
-
-        return self._local.apply(xy, unit, precision)
+        if not unit:
+            unit = self.__unit
+        if not precision:
+            precision = self.__precision
         
+        xy = []
+        for p in self._path.points:
+            xy.append(self._local.apply(p, unit, precision))
+        return xy
+
+    def append(self, point, width=None, offset=None):
+        """ append a single point to the end of the path """
+        self._path.segment(point, width, offset)
+        self._update_dir()
+
+    def extend(self, points, width=None, offset=None):
+        """ extend path points by appending elements from path """
+        for p in points:
+            self.append(p, width, offset)
+
+    def to(self, point, width=None, offset=None):
+        """ move to absolute position """
+        self.append(point, width, offset)
+        return self
+
+    def interp(self, p3, p4, p5, width=None, offset=None, relative=True):
+        """ interpolate the previous point with the following 4 points using a cubic bezier spline """
+        self._path.bezier([p3, p4, p5], width=width, offset=offset, relative=relative)
+
+    def bend(self, radius, angle, method='circular', b=0.2, width=None, offset=None):
+        """ produce a smooth bend turning by angle
+
+        inputs:
+            radius - bend radius
+            angle - ccw angle increment relative to curent direction in *degrees*
+            method - 'circular' or 'bezier' in which case the 'b' parameter is used
+        """
+
+        if abs(angle) > 180:
+            raise_PylayoutException("Cannot bend more than 180 degrees!")
+
+        a = radians(angle)
+
+        if method == 'bezier':
+
+            if abs(angle) > 90:
+                print("Warning: bezier bends of grater than 90 degrees will produce strange results at {}".format(self.end()))
+
+            p1 = Vec(self.end(), self.__unit, self.__precision)
+            c0 = p1 + sgn(angle)*self._t*radius
+            v = (p1 - c0).normalize()
+            h = radius * (1.0 / max(1e-1, cos(a/2)))
+            p0 = c0 + v.rotate(a/2) * h
+            p3 = c0 + v.rotate(a/2) * radius
+
+            v1 = (p1 - p0).normalize()
+            v2 = (p3 - p0).normalize()
+            l = (p1 - p0).length()
+
+            self._path.bezier([
+                p0 + v1*l*b,
+                p0 + v2*l*b,
+                p3
+            ], width, offset, relative=False)
+
+        elif method == 'circular':
+            self._path.turn(radius, a, width, offset)
+
+        else:
+            raise ValueError("Unrecognized method '%s' for bend!" % method)
+        
+        self._update_dir(radians(self.end_direction() + angle))
+        
+        return self
+
+    def smooth(self, points, angles=None, curl_start=1, curl_end=1, t_in=1, t_out=1, width=None, offset=None, relative=True):
+        """ add a smooth interpolating curve through the given points.
+        
+        Uses the Hobby algorithm [1]_ to calculate a smooth interpolating curve made of cubic Bezier segments between each pair of points.
+        """
+        self._path.smooth(points, angles, curl_start, curl_end, t_in, t_out, False, width, offset, relative)
+        self._update_dir()
+
+    def by(self, point, width=None, offset=None):
+        """ append a single point relative to the last position """
+        self._path.segment(point, width, offset, relative=True)
+        self._update_dir()
+        return self
+
+    def north(self, d, width=None, offset=None):
+        """ move north relative to last position """
+        self.by((0,d), width, offset)
+        return self
+
+    def east(self, d, width=None, offset=None):
+        """ move east relative to last position """
+        self.by((d,0), width, offset)
+        return self
+
+    def south(self, d, width=None, offset=None):
+        """ move south relative to last position """
+        self.by((0,-d), width, offset)
+        return self
+
+    def west(self, d, width=None, offset=None):
+        """ move west relative to last position """
+        self.by((-d,0), width, offset)
+        return self
+
+    def northeast(self, d, width=None, offset=None):
+        """ move north relative to last position """
+        _d = sqrt(d)
+        self.by((d,d), width, offset)
+        return self
+
+    def northwest(self, d, width=None, offset=None):
+        """ move north relative to last position """
+        _d = sqrt(d)
+        self.by((-d,d), width, offset)
+        return self
+
+    def southeast(self, d, width=None, offset=None):
+        """ move north relative to last position """
+        _d = sqrt(d)
+        self.by((d,-d), width, offset)
+        return self
+
+    def southwest(self, d, width=None, offset=None):
+        """ move north relative to last position """
+        _d = sqrt(d)
+        self.by((-d,-d), width, offset)
+        return self
+    
+    def to_angle(self, d, a, width=None, offset=None):
+        """ move relative to last position in the direction given by angle in *degrees* """
+        a = radians(a)
+        self.by((d*cos(a),d*sin(a)), width, offset)
+        return self
+    
+    def forward(self, d, width=None, offset=None):
+        """ move relative to last position in the forward going direction """
+        self.by(self._n * d, width, offset)
+        return self
+
+    def left(self, d, width=None, offset=None):
+        """ move relative to last position in the left going direction """
+        self.by(-self._t * d, width, offset)
+        return self
+
+    def right(self, d, width=None, offset=None):
+        """ move relative to last position in the right going direction """
+        self.by(self._t * d, width, offset)
+        return self

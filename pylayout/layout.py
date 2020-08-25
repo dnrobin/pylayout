@@ -1,13 +1,11 @@
-from pylayout.math import Transform, Transformed, AABB, degrees, radians
-from pylayout.utils import isnumeric, direction_angle, unique_name_for
+from pylayout.core import _pylayout_exception
+from pylayout.math import Transform, AABB, direction_angle, radians, degrees
+from pylayout.shapes import SimplePolygon, Path, Text
 from pylayout.builder import ComponentBuilder
-from pylayout.process import ProcessLayer, DesignRules
 from pylayout.routing import Port, Connection
-from pylayout.shapes import SimplePolygon, Path, FlexPath, RobustPath, Text
+from pylayout.utils import isnumber, dict_at, unique_name_for
 
 import gdspy
-
-import copy
 import inspect
 
 class Component:
@@ -17,13 +15,26 @@ class Component:
     like simple polygons, paths and text labels attached to process layers. They should always 
     define art least one I/O port for routing if they are to be used in circuits.
     """
-    def __init__(self, cell: gdspy.Cell, ports=dict()):
+    def __init__(self, cell: gdspy.Cell, ports=None):
         assert isinstance(cell, gdspy.Cell)
+
+        if ports is None:
+            ports = dict()
+        
         self.cell = cell
         self.ports = ports
     
     def get_bounds(self):
         return AABB(self.cell.get_bounding_box())
+
+    def get_port(self, key):
+        if isnumber(key):
+            return dict_at(self.ports, key)
+        else:
+            if key in self.ports:
+                return self.ports[key]
+            else:
+                raise KeyError("Port name '%s' not found on component!" % key)
 
 
 class ComponentLibrary:
@@ -67,6 +78,9 @@ class ComponentLibrary:
     def __len__(self):
         return len(self._components)
 
+    def __repr__(self):
+        return "\n".join(["%s ['"%key + "', '".join(item.ports) + "']\n" for key, item in self._components.items()])
+
     def add(self, name, component: Component):
         if not isinstance(component, Component):
             raise ValueError("Invalid argument supplied to add(), must be a component instance!")
@@ -91,9 +105,9 @@ class ComponentLibrary:
                     self._components[cell.name] = Component(cell)
             else:
                 if not name in lib.cells:
-                    raise KeyError("Component '%' not found in GDS file '%s'!")
+                    raise KeyError("Component '%s' not found in GDS file '%s'!" % (name, filename))
 
-                self._components[cell.name] = Component(cell)
+                self._components[name] = Component(lib.cells[name])
 
 
     def export_components(self, filename, name=None):
@@ -113,7 +127,7 @@ class ComponentLibrary:
                     lib.add(comp.cell, True, False, True)
             else:
                 if not name in lib._components:
-                    raise KeyError("Missing component '%' cannot be exported!")
+                    raise KeyError("Missing component '%s' cannot be exported!" % name)
 
                 lib.add(self._components[name].cell, True, False, True)
             
@@ -162,17 +176,35 @@ class ComponentReference:
     __slots__ = ("name", "cell", "ports")
 
     def __init__(self, name: str, comp: Component, local: Transform):
+
+        origin = local.translation
+        rotation = degrees(local.rotation)
+        magnification = abs(local.get_scale(1))
+        x_reflection = local.get_scale(0) < 0
+
+        # flipV implemententation
+        if local.get_scale(1) < 0:
+            origin = (origin[0], -origin[1])
+            rotation = 180 + rotation
+            x_reflection = True
+        
         self.name = name
         self.cell = gdspy.CellReference(
             comp.cell, 
-            local.translation, 
-            degrees(local.rotation), 
-            local.get_scale(1),
-            x_reflection = local.get_scale(0) < 0)
+            origin, 
+            rotation,
+            magnification,
+            x_reflection)   # !!! x_reflection doesn't seem to apply...
 
         self.ports = dict()
         for name, port in comp.ports.items():
-            self.ports[name] = PortReference(port, local)
+            if isinstance(port, PortReference):
+                self.ports[name] = PortReference(port._port, local * port._local)
+            else:
+                self.ports[name] = PortReference(port, local)
+
+    def __getitem__(self, port_name):
+        return self.get_port(port_name)
 
     def get_bounds(self):
         return AABB(self.cell.get_bounding_box())
@@ -184,11 +216,8 @@ class ComponentReference:
         return self.cell.area()
 
     def get_port(self, key):
-        if isnumeric(key):
-            ports = self.ports.value()
-            if key < 0 or key >= len(ports):
-                raise IndexError('Port index out of range!')
-            return ports[key]
+        if isnumber(key):
+            return dict_at(self.ports, int(key))
         else:
             if key in self.ports:
                 return self.ports[key]
@@ -201,22 +230,34 @@ class ComponentArray:
 
     __slots__ = ("name", "cell", "ports")
         
-    def __init__(self, rows, cols, name: str, comp: Component, local: Transform, padding=0):
+    def __init__(self, rows, cols, name: str, comp: Component, local: Transform, spacing=0):
         assert cols > 0
         assert rows > 0
+
+        origin = local.translation
+        rotation = degrees(local.rotation)
+        magnification = abs(local.get_scale(1))
+        x_reflection = local.get_scale(0) < 0
+
+        # flipV implemententation
+        if local.get_scale(1) < 0:
+            origin = (origin[0], -origin[1])
+            rotation = 180 + rotation
+            x_reflection = True
+
+        if isnumber(spacing):
+            spacing = (spacing, spacing)
+
         self.name = name
-
-        if isnumeric(padding):
-            padding = (padding, padding)
-
-        sx, sy = comp.get_bounds().size()
-        spacing = (sx + padding[0], sy + padding[1])
-
-        self.cell = gdspy.CellArray(comp.cell, cols, rows, spacing, 
-            local.translation, 
-            degrees(local.rotation), 
-            local.get_scale(1),
-            x_reflection = local.get_scale(0) < 0)
+        self.cell = gdspy.CellArray(
+            comp.cell,
+            cols,
+            rows,
+            spacing,  
+            origin, 
+            rotation,
+            magnification,
+            x_reflection)   # !!! x_reflection doesn't seem to apply...
 
         self.ports = list()
         for i in range(rows):
@@ -243,7 +284,7 @@ class ComponentArray:
         if row >= self.rows or col >= self.cols:
             raise ValueError("row, column out of range for component array of size [%d,%d]" % (self.rows, self.cols))
 
-        if isnumeric(key):
+        if isnumber(key):
             ports = self.ports[row][col].values()
             if key < 0 or key >= len(ports):
                 raise IndexError('Port index out of range!')
@@ -256,8 +297,8 @@ class ComponentArray:
 
 
 class ComponentVariants:
-    # TODO: ######################
-    pass
+    def __init__(self):
+        raise NotImplementedError("ComponentVariants is not yet implemented")
 
 
 class Layout:
@@ -275,7 +316,7 @@ class Layout:
             lib - ComponentLibrary, shared component library or None to create a new one
             unit, precision - number, snap all layout elements to the grid defined by grid=(precision/unit)
         """
-        self.cell = gdspy.Cell(name)
+        self.cell = gdspy.Cell(name, exclude_from_current=True)
         self._name = name
         
         if lib is None:
@@ -285,15 +326,28 @@ class Layout:
         self._unit = lib.unit
         self._precision = lib.precision
 
-        self._layouts = dict()          # dictionary of placed sub layouts
+        self.ports = dict()            # dictionary of exposed ports
+        
         self._references = dict()       # dictionary of placed components
         self._connections = list()      # list of connections between ports
 
-    @property
-    def components(self): return self._references
-    
-    @property
-    def layouts(self): return self._layouts
+    def __getitem__(self, key):
+        if isnumber(key):
+            return dict_at(self.ports, int(key))
+        else:
+            if key in self.ports:
+                return self.ports[key]
+            else:
+                raise KeyError("Port name '%s' not found in layout!" % key)
+
+    def __getattribute__(self, key):
+        if key in object.__getattribute__(self, '_references'):
+            return object.__getattribute__(self, '_references')[key]
+        else:
+            return object.__getattribute__(self, key)
+
+    def port(self, name, port):
+        self.ports[name] = self._port(port)
 
     def get_bounds(self):
         return AABB(self.cell.get_bounding_box())
@@ -308,49 +362,55 @@ class Layout:
         output:
             name of the inserted layout (same if allow_duplicates or generated name if a copy)
         """
-        self._gdslib.add(layout.cell, True, not allow_duplicates, True)
-
-        if not isinstance(item, Layout):
-            raise ValueError('Invalid argument supplied to sub_layout(), must be a Layout instance!')
-
-        if isnumeric(scalefactor):
-            scalefactor = (scalefactor, scalefactor)
-        if flipV:
-            scalefactor[1] = -scalefactor[1]
-
-        if layout._name == self._name:
-            raise ValueError("Cannot add sub layout with the same name as this layout!")
+        if not isinstance(layout, Layout):
+            raise ValueError('Invalid argument supplied to place_layout(), must be a Layout instance!')
 
         name = layout._name
-        if name in self._layouts:
+        if name in self._references:
             if not allow_duplicates:
-                raise ValueError("A sub layout by the name '%s' already exists in the layout '%'", (name, self._name))
-            name = unique_name_for(name, self._layouts)
+                raise ValueError("A sub layout by the name '%s' already exists in the layout '%s'" % (name, self._name))
+            name = unique_name_for(name, self._references)
+            
+            # TODO: changing all names???
+            layout._name = name
+            layout.cell.name = name
+        
+        def _rename_children(parent):
+            # TODO: only rename what is truly unique...??
+            for ref in parent.get_dependencies(True):
+                _rename_children(ref)
+                ref.name = "%s.%s" % (parent.name, ref.name)
+        _rename_children(layout.cell)
 
-        self._layouts[name] = layout
+        local = Transform(
+            scalefactor, 
+            radians(direction_angle(orientation)), 
+            origin, 
+            self._unit, 
+            self._precision)
+        if flipV:
+            local.flipV()
 
-        self.cell.add(gdspy.CellReference(layout.cell, 
-            origin,
-            direction_angle(orientation),
-            scalefactor[1],
-            x_reflection = scalefactor[0] < 0))
+        reference = ComponentReference(name, layout, local)
+        self.cell.add(reference.cell)
+        self._references[name] = reference        
 
-        return name
+        return reference
 
-    def _place(self, name, item, origin=(0,0), orientation='e', scalefactor=1.0, flipV=False, params={}, allow_duplicates=False):
-
+    def _place(self, name, item, origin=(0,0), orientation='e', scalefactor=1.0, flipV=False, params=None, allow_duplicates=False):
+        
         if name == self._name:
             raise ValueError("Cannot place a component with the same name as the layout name!")
         
         if name in self._references:
             if not allow_duplicates:
-                raise ValueError("A component with the name '%s' already exists on the layout!" % name)
+                raise ValueError("A component with the name '%s' already exists in the layout!" % name)
             name = unique_name_for(name, self._references)
 
         if isinstance(item, Component):
             comp = item
 
-        if isinstance(item, str):
+        elif isinstance(item, str):
             if not item in self._lib:
                 raise ValueError("Component name '%s' not found in layout's component library!" % item)
             comp = self._lib[item]
@@ -358,7 +418,10 @@ class Layout:
         else:
 
             if inspect.isclass(item):
-                item = item(**params)
+                if params is None:
+                    item = item()
+                else:
+                    item = item(**params)
             
             if not isinstance(item, ComponentBuilder):
                 raise ValueError('Invalid argument supplied to place(), item must be a component instance or a builder!')
@@ -376,8 +439,8 @@ class Layout:
         
         return (name, comp, local)
 
-    def place(self, name, item, origin=(0,0), orientation='e', scalefactor=1.0, flipV=False, params={}, allow_duplicates=False):
-
+    def place(self, name, item, origin=(0,0), orientation='e', scalefactor=1.0, flipV=False, params=None, allow_duplicates=False):
+        """ place a component at (x, y) in the layout """
         (name, comp, local) = self._place(name, item, origin, orientation, scalefactor, flipV, params, allow_duplicates)
 
         reference = ComponentReference(name, comp, local)
@@ -386,11 +449,11 @@ class Layout:
 
         return reference
 
-    def array(self, name, item, rows, cols, padding=0, origin=(0,0), orientation='e', scalefactor=1.0, flipV=False, params={}, allow_duplicates=False):
-        
+    def array(self, name, item, rows, cols, spacing=0, origin=(0,0), orientation='e', scalefactor=1.0, flipV=False, params=None, allow_duplicates=False):
+        """ place a 2x2 array of components at (x, y) in the layout """
         (name, comp, local) = self._place(name, item, origin, orientation, scalefactor, flipV, params, allow_duplicates)
 
-        reference = ComponentArray(rows, cols, name, comp, local, padding)
+        reference = ComponentArray(rows, cols, name, comp, local, spacing)
         self.cell.add(reference.cell)
         self._references[name] = reference
 
@@ -400,15 +463,15 @@ class Layout:
         if isinstance(port, PortReference):
             return port
         elif isinstance(port, ComponentReference):
-            return self.get_port(port.name)
+            return self._find_internal_port(port.name)
         elif isinstance(port, str):
-            return self.get_port(port)
+            return self._find_internal_port(port)
         elif isinstance(port, Component):
             raise ValueError("Cannot route a library component! The component must first be place on the layout.")
         else:
             raise TypeError("Invalid argument type for port in connect(), got %s" % type(port))
     
-    def connect(self, port1, port2, bend_radius=1):
+    def connect(self, port1, port2):
         """ connect two ports to create a route 
 
         input:
@@ -420,7 +483,7 @@ class Layout:
         _port2 = self._port(port2)
 
         if _port1.width != _port2.width:
-            raise ValueError("Cannot connect ports '%s' and '%s' with different width" % (_port1, _port2))
+            _pylayout_exception("Cannot connect ports '%s' and '%s' with different width" % (_port1, _port2))
 
         connection = Connection(_port1, _port2, self._unit, self._precision)
         
@@ -428,14 +491,25 @@ class Layout:
 
         return connection
 
-    def get_component(self, name: str) -> Component:
+    def get_component(self, name: str):
         """ get placed component by name """
         if not name in self._references:
             raise KeyError("Component '%s' not found in layout '%s'" % (name, self._name))
         return self._references[name]
+
+    def get_layout(self, name: str):
+        """ get placed layout by name """
+        if not name in self._references:
+            raise KeyError("Sublayout '%s' not found in layout '%s'" % (name, self._name))
+        return self._references[name]
+
+    def get_port(self, name: str):
+        """ get layout port by name """
+        if not name in self.ports:
+            raise KeyError("Port '%s' not found in layout '%s'" % (name, self._name))
+        return self.ports[name]
         
-    def get_port(self, identifier: str) -> Port:
-        """ get placed component port by name identifier """
+    def _find_internal_port(self, identifier: str):
         import re
 
         match = re.fullmatch('(\w+)(?:\[(\d+)\])?(?:\[(\d+)\])?(?:\.(\w+))?', identifier)
@@ -501,34 +575,40 @@ class Layout:
         return _get(groups[3], component.ports)
 
     def _builer_to_cell(self, builder: ComponentBuilder):
-        import gdspy
 
         name = repr(builder)
+
+        # NOTE: this automotamic behavior can be a real pain to debug in the event of two distinct
+        #   component builder instances generating the same name without the user aware! Always make
+        #   a unique name?
 
         if name in self._lib:
             return self._lib[name]
 
         else:
-            cell = gdspy.Cell(name)
+            cell = gdspy.Cell(name, exclude_from_current=True)
 
             for layer, shape in builder.shapes:
-                if isinstance(shape, (SimplePolygon, FlexPath, RobustPath)):
+                # TODO: consider wrapping all gdspy primitives at the shape level
+                if isinstance(shape, SimplePolygon):
                     cell.add(gdspy.Polygon(shape.get_points(self._unit, self._precision), layer.layer, layer.dtype))
                 
                 elif isinstance(shape, Path):
-                    if shape.gds_path:
-                        cell.add(gdspy.FlexPath(
-                            shape.get_points(self._unit, self._precision),
-                            shape.width,
-                            precision=self._precision/self._unit,
-                            gdsii_path=True, 
-                            layer=layer.layer,
-                            datatype=layer.dtype))
-                    else:
-                        cell.add(gdspy.Polygon(
-                            shape.get_points(self._unit, self._precision), 
-                            layer.layer, 
-                            layer.dtype))
+                    path = shape._path
+
+                    # apply the local transform
+                    path.transform(
+                        shape._local.translation,
+                        shape._local.rotation,
+                        shape._local.get_scale(1),
+                        shape.get_scale(0) < 0)
+                    
+                    # set the layer/datatype of all polygons
+                    for i in range(len(path.layers)):
+                        path.layers[i] = layer.layer
+                        path.datatypes[i] = layer.dtype
+                    
+                    cell.add(path)
 
                 elif isinstance(shape, Text):
                     if shape.polygonal:
@@ -555,9 +635,12 @@ class Layout:
             self._lib.add(name, c)
             return c
 
-    def save(self, filename):
+    def save(self, filename=None):
         """ export layout to GDSII file """
         from os.path import realpath
+
+        if filename is None:
+            filename = self._name + '.gds'
 
         lib = gdspy.GdsLibrary(self._name, unit=self._unit, precision=self._precision)
         lib.add(self.cell, True, False, True)
@@ -565,3 +648,10 @@ class Layout:
         filename = realpath(filename)
         with open(filename, 'wb') as outfile:
             lib.write_gds(outfile)
+
+class Device:
+    """ a combination of a layout containing placed cells, routes and optional connectivity ports to be used at the system level """
+    pass
+
+class DeviceReference:
+    pass

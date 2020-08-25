@@ -1,5 +1,4 @@
-from pylayout.utils import *
-
+from pylayout.utils import isnumber, isvec, direction_angle, clamp
 from math import (
     isclose,
     trunc,
@@ -16,16 +15,9 @@ from math import (
     radians as _radians)
 
 import numpy
-import copy
 
 def sgn(x):
     return -1.0 if x < 0 else 1.0
-
-def wrapradians(angle):
-    raise Exception("Deprecated!")
-
-def wrapdegrees(angle):
-    raise Exception("Deprecated!")
 
 def radians(x: float) -> float:
     """ convert angle from *degrees to radians* and return result within domain [0, 2pi[ """
@@ -33,7 +25,7 @@ def radians(x: float) -> float:
 
 def degrees(x: float) -> float:
     """ convert angle from *radians to degrees* and return result within domain [0, 360[ """
-    return _degrees(float(numpy.angle(numpy.exp(1j*x))))
+    return float(_degrees(numpy.angle(numpy.exp(1j*x))))
 
 def wrap(x, deg=False):
     """ wrap angle in domain [0, 2pi[ or [0, 360[ if deg is True """
@@ -62,23 +54,29 @@ class Vec:
         
         self.__unit = unit
         self.__precision = precision
-        self.__digits = trunc(-log10(precision/unit))
+        self.__digits = abs(trunc(-log10(precision/unit)))
         if x is None and y is None:
             self._x = 0.0
             self._y = 0.0
-        elif isvector(x):
-            assert len(x) == 2 and isnumeric(x[0])
+        elif isvec(x):
+            assert len(x) == 2 and isnumber(x[0])
             self.x = round(x[0], self.__digits)
             self.y = round(x[1], self.__digits)
         else:
-            assert isnumeric(x)
+            assert isnumber(x)
             self._x = round(x, self.__digits)
             if y is None:
                 self._y = self._x
             else:
                 self._y = round(y, self.__digits)
 
+    @classmethod
+    def directional(cls, angle, deg=False, unit=1, precision=1e-9):
+        if deg: angle = radians(angle)
+        return Vec(cos(angle), sin(angle), unit, precision)
+
     def assign(self, v):
+        """ assign the components from another vector """
         self.__unit = v.__unit
         self.__precision = v.__precision
         self.__digits = v.__digits
@@ -120,24 +118,39 @@ class Vec:
         return "({:.4f}, {:.4f})".format(self._x, self._y)
     
     def __add__(self, other):
-        if not isvector(other):
+        if not isvec(other):
             raise ValueError("invalid operand for '+' with Vec. must be a vector compatible type.")
         return Vec(self._x + other[0], self._y + other[1], self.__unit, self.__precision)
 
     def __sub__(self, other):
-        if not isvector(other):
+        if not isvec(other):
             raise ValueError("invalid operand for '-' with Vec. must be a vector compatible type.")
         return Vec(self._x - other[0], self._y - other[1], self.__unit, self.__precision)
 
     def __mul__(self, other):
-        if not isnumeric(other):
+        if not isnumber(other):
             raise ValueError("invalid operand for '*' with Vec. must be a numeric scalar type.")
         return Vec(self._x * other, self._y * other, self.__unit, self.__precision)
 
     def __truediv__(self, other):
-        if not isnumeric(other):
+        if not isnumber(other):
             raise ValueError("invalid operand for '/' with Vec. must be a numeric scalar type.")
         return Vec(self._x / other, self._y / other, self.__unit, self.__precision)
+
+    def __radd__(self, other):
+        if not isvec(other):
+            raise ValueError("invalid operand for '+' with Vec. must be a vector compatible type.")
+        return Vec(other[0] + self._x, other[1] + self._y, self.__unit, self.__precision)
+
+    def __rsub__(self, other):
+        if not isvec(other):
+            raise ValueError("invalid operand for '-' with Vec. must be a vector compatible type.")
+        return Vec(other[0] - self._x, other[1] - self._y, self.__unit, self.__precision)
+
+    def __rmul__(self, other):
+        if not isnumber(other):
+            raise ValueError("invalid operand for '*' with Vec. must be a numeric scalar type.")
+        return Vec(self._x * other, self._y * other, self.__unit, self.__precision)
 
     def __neg__(self):
         return Vec(-self._x, -self._y, self.__unit, self.__precision)
@@ -152,35 +165,35 @@ class Vec:
         return Vec(pow(self._x, p), pow(self._y, p), self.__unit, self.__precision)
 
     def __iadd__(self, other):
-        if not isvector(other):
+        if not isvec(other):
             raise ValueError("invalid operand for '+' with Vec. must be a vector compatible type.")
         self.x += other[0]
         self.y += other[1]
         return self
 
     def __isub__(self, other):
-        if not isvector(other):
+        if not isvec(other):
             raise ValueError("invalid operand for '-' with Vec. must be a vector compatible type.")
         self.x -= other[0]
         self.y -= other[1]
         return self
 
     def __imul__(self, other):
-        if not isnumeric(other):
+        if not isnumber(other):
             raise ValueError("invalid operand for '*' with Vec. must be a numeric scalar type.")
         self.x *= other
         self.y *= other
         return self
 
     def __itruediv__(self, other):
-        if not isnumeric(other):
+        if not isnumber(other):
             raise ValueError("invalid operand for '/' with Vec. must be a numeric scalar type.")
         self.x /= other
         self.y /= other
         return self
 
     def __eq__(self, other):
-        if not isvector(other):
+        if not isvec(other):
             raise ValueError('invalid comparison operand type with Vec')
         if not isclose(self._x, other[0], rel_tol=1e-6, abs_tol=1e-3): return False
         if not isclose(self._y, other[1], rel_tol=1e-6, abs_tol=1e-3): return False
@@ -189,12 +202,12 @@ class Vec:
         return not self.__eq__(other)
 
     def __lt__(self, other):
-        if not isvector(other):
+        if not isvec(other):
             raise ValueError('invalid comparison operand type with Vec. must be a vector compatible type.')
         return (self._x < other[0]) and (self._y < other[1])
 
     def __gt__(self, other):
-        if not isvector(other):
+        if not isvec(other):
             raise ValueError('invalid comparison operand type with Vec. must be a vector compatible type.')
         return (self._x > other[0]) and (self._y > other[1])
 
@@ -205,12 +218,15 @@ class Vec:
         return self.__gt__(other) or self.__eq__(other)
     
     def length2(self):
+        """ compute the length squared of the vector """
         return self._x**2 + self._y**2
     
     def length(self):
+        """ compute the length of the vector  """
         return sqrt(self._x**2 + self._y**2)
 
     def angle(self, deg=False):
+        """ compute the angle of the vector in radians or degrees """
         a = atan2(self._y, self._x)
         return degrees(a) if deg else a
 
@@ -222,13 +238,13 @@ class Vec:
 
     def near(self, v, tolerance=1e-3):
         """ check if near other point (within length tolerance) """
-        assert isvector(v)
+        assert isvec(v)
         return isclose(self._x, v[0], abs_tol=tolerance) and isclose(self._y, v[1], abs_tol=tolerance)
 
     def snap(self, x, y=None):
         """ round coordinates to nearest grid coordinate """
         if y is None:
-            if isvector(x):
+            if isvec(x):
                 x = x[0]
                 y = x[1]
             else:
@@ -239,58 +255,67 @@ class Vec:
         return self
 
     def flipH(self):
+        """ flip horizontal """
         self._x = -self._x
         return self
 
     def flipV(self):
+        """ flip vertical """
         self._y = -self._y
         return self
 
     def dot(self, v):
-        assert isvector(v)
+        """ compute the dot product of other vector with this one """
+        assert isvec(v)
         return self._x*v[0] + self._y*v[1]
 
     def cross(self, v):
-        assert isvector(v)
+        """ compute the 2D cross product of other vector with this one """
+        assert isvec(v)
         return self._x*v[1] - self._y*v[0]
     
     def lerp(self, a, b, t):
-        assert isvector(a) and isvector(b) and isnumeric(t)
+        """ linearly interpolate this vector from a to b using parameter t[0,1] """
+        assert isvec(a) and isvec(b) and isnumber(t)
         t = clamp(float(t), 0.0, 1.0)
         self.x = (1 - t)*a.x + t*b.x
         self.y = (1 - t)*a.y + t*b.y
         return self
 
     def trim(self, d):
-        assert isnumeric(d)
+        """ set vector length to d preserving direction """
+        assert isnumber(d)
         v = self.normalize() * d
         self.x = v[0]
         self.y = v[1]
         return self
 
-    def point_at(self, p):
-        assert isvector(p)
+    def point_to(self, p):
+        """ change the direction of the vector to point to p preserving the length """
+        assert isvec(p)
         h = self.length()
         self.x = p[0]
         self.y = p[1]
         return self.trim(h)
     
-    def scale(self, s):
-        if isvector(s):
-            self.x *= s[0]
-            self.y *= s[1]
+    def scale(self, factor):
+        """ scale the vector by the factor """
+        if isvec(factor):
+            self.x *= factor[0]
+            self.y *= factor[1]
         else:
-            assert isnumeric(s)
-            self.x *= s
-            self.y *= s
+            assert isnumber(factor)
+            self.x *= factor
+            self.y *= factor
         return self
     
     def translate(self, d, dy=None):
-        if isvector(d):
+        """ translate the vector by d=(dx, dy) or (d, dy) """
+        if isvec(d):
             self.x += d[0]
             self.y += d[1]
         else:
-            assert isnumeric(d)
+            assert isnumber(d)
             if dy is None:  # translate in the vector direction
                 self.x += sqrt(d)
                 self.y += sqrt(d)
@@ -299,10 +324,11 @@ class Vec:
                 self.y += dy
             return self
 
-    def rotate(self, a):    # ccw rotation
-        assert isnumeric(a)
-        c = cos(a)
-        s = sin(a)
+    def rotate(self, angle):    # ccw rotation
+        """ apply ccw rotation to the vector by angle in *radians* """
+        assert isnumber(angle)
+        c = cos(angle)
+        s = sin(angle)
         x = self._x
         y = self._y
         self.x = x*c - y*s
@@ -310,6 +336,7 @@ class Vec:
         return self
 
     def array(self):
+        """ return the vector as a tuple """
         return (self._x, self._y)
 
 
@@ -347,24 +374,40 @@ class Transform:
             origin - vector-like, translation (dx, dy)
         """
 
-        if not isvector(translation):
+        if not isvec(translation):
             raise ValueError("Translation must be a vector type (dx,dy)!")
 
         self.__unit = unit
         self.__precision = precision
-        self.__digits = trunc(-log10(precision/unit))
+        self.__digits = abs(trunc(-log10(precision/unit)))
 
         self.__scale = Vec(scale, unit=unit, precision=precision)
         self.__rotation = wrap(rotation)
         self.__translation = Vec(translation, unit=unit, precision=precision)
 
     def __mul__(self, other):
-        if isvector(other):
+        if isvec(other):
             return self.apply(other)
-        elif type(other) is Transform:
-            m1 = self.matrix()
-            m2 = other.matrix()
-            return Transform.from_matrix(m1 * m2)
+        elif isinstance(other, Transform):
+            t = Transform()
+            t.assign(self)
+            t.transform(other.get_scale(), other.get_rotation(), other.get_translation())
+
+            # c = cos(self.__rotation)
+            # s = sin(self.__rotation)
+            # m11 = self.__scale.x*c
+            # m12 = -self.__scale.y*s
+            # m21 = self.__scale.x*s
+            # m22 = self.__scale.y*c
+
+            # return numpy.array([
+            #     [m11, m12, self.__translation.x],
+            #     [m21, m22, self.__translation.y],
+            #     [0, 0, 1]
+            # ])
+
+            return t
+
         else:
             raise ValueError("invalid operant type for '*' with Transform")
 
@@ -418,9 +461,9 @@ class Transform:
             u, p = (1, 1)
             if unit: u = unit
             if precision: p = precision
-            d = trunc(-log10(p/u))
+            d = abs(trunc(-log10(p/u)))
 
-        if not isnumeric(point[0]):
+        if not isnumber(point[0]):
             xy = []
             for p in point:
                 xy.append(self.apply(p, unit, precision))
@@ -435,16 +478,6 @@ class Transform:
 
         # always return a tuple
         return (x, y)
-
-    @classmethod
-    def from_matrix(cls, m):
-        """ set transform using matrix or other transform """
-        m = numpy.ndarray(m)
-
-        angle = asin(t[1][0])
-        self.__rotation = angle
-        self.__scale = Vec(t[0][0]/cos(angle), t[1][1]/cos(angle), self.__unit, self.__precision)
-        self.__translation = Vec(t[0][2], t[1][2], self.__unit, self.__precision)
 
     def get_scale(self, index=None):
         if index is None:
@@ -463,7 +496,7 @@ class Transform:
 
     def set_rotation(self, angle):
         """ sets the rotation angle in *radians* """
-        assert isnumeric(angle)
+        assert isnumber(angle)
         self.__rotation = wrap(angle)
 
     rotation = property(get_rotation, set_rotation)
@@ -473,10 +506,10 @@ class Transform:
     
     def set_translation(self, dx, dy=None):
         if dy is None:
-            assert isvector(dx)
+            assert isvec(dx)
             self.__translation = Vec(dx, None, self.__unit, self.__precision)
         else:
-            assert isnumeric(dx)
+            assert isnumber(dx)
             self.__translation.x = dx
             self.__translation.y = dy
 
@@ -487,10 +520,10 @@ class Transform:
     
     def set_origin(self, x, y=None):
         if y is None:
-            assert isvector(x)
+            assert isvec(x)
             self.__translation = -Vec(x, None, self.__unit, self.__precision)
         else:
-            assert isnumeric(x)
+            assert isnumber(x)
             self.__translation.x = -x
             self.__translation.y = -y
 
@@ -506,7 +539,7 @@ class Transform:
     def translate(self, d, dy=None):
         """ translates by vector d, or by (dx,dy) (mutates the transform) """
         if dy is None:
-            assert isvector(d)
+            assert isvec(d)
             self.__translation += Vec(d, None, self.__unit, self.__precision)
         else:
             self.__translation.x += d
@@ -535,22 +568,6 @@ class Transform:
         self.__scale = Vec(1.0, 1.0, self.__unit, self.__precision)
         self.__rotation = 0.0
         self.__translation = Vec(0.0, 0.0, self.__unit, self.__precision)
-
-    def matrix(self):
-        """ get 3x3 numpy matrix representation """
-        
-        c = cos(self.__rotation)
-        s = sin(self.__rotation)
-        m11 = self.__scale.x*c
-        m12 = -self.__scale.y*s
-        m21 = self.__scale.x*s
-        m22 = self.__scale.y*c
-
-        return numpy.array([
-            [m11, m12, tx],
-            [m21, m22, ty],
-            [0, 0, 1]
-        ])
 
 
 class AABB:
@@ -594,23 +611,23 @@ class AABB:
         return b
 
     def grow(self, point):
-        if not isnumeric(point[0]):
+        if not isnumber(point[0]):
             for p in point:
                 self.grow(p)
         else:
-            v = Vec(point)
-            if v.x < self.xmin: self.xmin = v.x
-            if v.x > self.xmax: self.xmax = v.x
-            if v.y < self.ymin: self.ymin = v.y
-            if v.y > self.ymax: self.ymax = v.y
+            if point[0] < self.xmin: self.xmin = point[0]
+            if point[0] > self.xmax: self.xmax = point[0]
+            if point[1] < self.ymin: self.ymin = point[1]
+            if point[1] > self.ymax: self.ymax = point[1]
 
-    @property
-    def width(self):
+    def get_width(self):
         return self.xmax - self.xmin
 
-    @property
-    def height(self):
+    def get_height(self):
         return self.ymax - self.ymin
+
+    width = property(get_width)
+    height = property(get_height)
 
     def xrange(self):
         return (self.xmin, self.xmax)
@@ -626,38 +643,39 @@ class AABB:
 
     def points(self):
         return [
-            self.lower_left(),
-            self.lower_right(),
-            self.upper_right(),
-            self.upper_left()
+            self.bottom_left,
+            self.bottom_right,
+            self.top_right,
+            self.top_left
         ]
 
+    @property
     def center(self):
-        return Vec((self.xmin + self.xmax)/2, (self.ymin + self.ymax)/2)
-
+        return ((self.xmin + self.xmax)/2, (self.ymin + self.ymax)/2)
+    @property
     def left(self):
-        return Vec(self.xmin, (self.ymin + self.ymax)/2)
-
+        return (self.xmin, (self.ymin + self.ymax)/2)
+    @property
     def right(self):
-        return Vec(self.xmax, (self.ymin + self.ymax)/2)
-
+        return (self.xmax, (self.ymin + self.ymax)/2)
+    @property
     def top(self):
-        return Vec((self.xmin + self.xmax)/2, self.ymax)
-
+        return ((self.xmin + self.xmax)/2, self.ymax)
+    @property
     def bottom(self):
-        return Vec((self.xmin + self.xmax)/2, self.ymin)
-
-    def lower_left(self):
-        return Vec(self.xmin, self.ymin)
-
-    def lower_right(self):
-        return Vec(self.xmax, self.ymin)
-
-    def upper_left(self):
-        return Vec(self.xmin, self.ymax)
-
-    def upper_right(self):
-        return Vec(self.xmax, self.ymax)
+        return ((self.xmin + self.xmax)/2, self.ymin)
+    @property
+    def bottom_left(self):
+        return (self.xmin, self.ymin)
+    @property
+    def bottom_right(self):
+        return (self.xmax, self.ymin)
+    @property
+    def top_left(self):
+        return (self.xmin, self.ymax)
+    @property
+    def top_right(self):
+        return (self.xmax, self.ymax)
     
     def is_point_inside(self, x, y):
         return x > self.xmin and x < self.xmax and y > self.ymin and y < self.ymax
@@ -680,7 +698,7 @@ class QuickPath:
         self.__precision = precision
         self.xy = []
 
-        if not isnumeric(initial_point[0]):
+        if not isnumber(initial_point[0]):
             self.extend(initial_point)
         else:
             self.append(initial_point)
@@ -700,9 +718,9 @@ class QuickPath:
     def __setitem__(self, idx, value):
         if idx < -len(self.xy) or idx >= len(self.xy): 
             raise IndexError("Index %s out of range in path!" % idx)
-        if not isvector(value):
+        if not isvec(value):
             raise ValueError("Invalid type set append path! Must be a vector addressable type.")
-        self.xy[idx] = Vec(value)
+        self.xy[idx] = Vec(value, None, self.__unit, self.__precision)
 
     def __delitem__(self, idx):
         if idx < -len(self.xy) or idx >= len(self.xy): 
@@ -735,7 +753,9 @@ class QuickPath:
 
     def remove(self, index):
         """ remove a single point at index """
-        if index < 0 or index >= len(self.xy) : raise IndexError('Index out of range')
+        if index < 0:
+            index += len(self.xy)
+        if index >= len(self.xy) : raise IndexError('Index out of range')
         del self.xy[index]
 
     def reverse(self):
@@ -807,7 +827,7 @@ class QuickPath:
 
     def append(self, point):
         """ append a single point to the end of the path """
-        self.xy.append(Vec(point,unit=self.__unit,precision=self.__precision))
+        self.xy.append(Vec(point, None, self.__unit, self.__precision))
 
     def extend(self, points):
         """ extend path points by appending elements from path """
@@ -820,45 +840,47 @@ class QuickPath:
     def to(self, point):
         """ move to absolute position """
         self.append(point)
+        return self
 
-    def move_by(self, point):
+    def by(self, point):
         """ append a single point relative to the last position """
         if len(self.xy) > 0:
-            self.xy.append(self.xy[-1] + Vec(point,unit=self.__unit,precision=self.__precision))
+            self.xy.append(self.xy[-1] + Vec(point, None, self.__unit, self.__precision))
         else:
             self.xy.append(point)
+        return self
 
     def north(self, d):
         """ move north relative to last position """
-        self.move_by(Vec(0,d,self.__unit,self.__precision))
+        self.by(Vec(0,d,self.__unit,self.__precision))
         return self
 
     def east(self, d):
         """ move east relative to last position """
-        self.move_by(Vec(d,0,self.__unit,self.__precision))
+        self.by(Vec(d,0,self.__unit,self.__precision))
         return self
 
     def south(self, d):
         """ move south relative to last position """
-        self.move_by(Vec(0,-d,self.__unit,self.__precision))
+        self.by(Vec(0,-d,self.__unit,self.__precision))
         return self
 
     def west(self, d):
         """ move west relative to last position """
-        self.move_by(Vec(-d,0,self.__unit,self.__precision))
+        self.by(Vec(-d,0,self.__unit,self.__precision))
         return self
     
     def to_angle(self, d, a):
         """ move relative to last position in the direction given by angle in *degrees* """
         a = radians(a)
-        self.move_by(Vec(d*cos(a),d*sin(a),self.__unit,self.__precision))
+        self.by(Vec(d*cos(a),d*sin(a),self.__unit,self.__precision))
         return self
     
     def forward(self, d):
         """ move relative to last position in the forward going direction """
         if len(self.xy) > 1:
             n = (self.xy[-1] - self.xy[-2]).normalize()
-            self.move_by(n * d)
+            self.by(n * d)
         else:
             self.to_angle(d, self.end_direction())
         return self
@@ -868,7 +890,7 @@ class QuickPath:
         # self.to_angle(d, self.end_direction() + 90.0)
         if len(self.xy) > 1:
             n = (self.xy[-1] - self.xy[-2]).normalize()
-            self.move_by(Vec(-n[1], n[0]) * d)
+            self.by(Vec(-n[1], n[0], self.__unit, self.__precision) * d)
         else:
             self.to_angle(d, degrees(self.__initial_dir) + 90)
         return self
@@ -878,7 +900,7 @@ class QuickPath:
         # self.to_angle(d, self.end_direction() - 90.0)
         if len(self.xy) > 1:
             n = (self.xy[-1] - self.xy[-2]).normalize()
-            self.move_by(Vec(n[1], -n[0]) * d)
+            self.by(Vec(n[1], -n[0], self.__unit, self.__precision) * d)
         else:
             self.to_angle(d, degrees(self.__initial_dir) - 90)
         return self
@@ -910,34 +932,42 @@ class Transformed:
     def y(self): return self._local.y
 
     def scale(self, scale):
+        """ scales by scale factor (mutates the transform) """
         self._local.scale(scale)
         return self
 
     def translate(self, d, dy=None):
+        """ translates by vector d, or by (dx,dy) (mutates the transform) """
         self._local.translate(d, dy)
         return self
 
     def rotate(self, angle):
+        """ rotates by angle in *radians* (mutates the transform) """
         self._local.rotate(angle)
         return self
 
     def flipV(self):
+        """ reflect y-coordinate (mutates the transform) """
         self._local.flipV()
         return self
 
     def flipH(self):
+        """ reflect x-coordinate (mutates the transform) """
         self._local.flipH
         return self
 
     def reflect(self):
+        """ reflect off the diagonal (mutates the transform) """
         self._local.reflect()
         return self
 
     def transform(self, scale=1.0, rotation=0.0, translation=(0,0)):
+        """ transform all at once in this order: scale, rotate, translate """
         self._local.transform(scale, rotation, translation)
         return self
 
     def set_origin(self, x, y=None):
+        """ change local coordinate system origin """
         self._local.set_origin(x, y)
 
     def set_translation(self, x, y=None):
@@ -962,4 +992,5 @@ class Transformed:
         return self._local.get_scale(index)
 
     def reset_transformation(self):
+        """ reset transformation to identity """
         self._local.reset()

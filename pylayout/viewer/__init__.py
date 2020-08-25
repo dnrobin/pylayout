@@ -1,5 +1,5 @@
-from model import *
-from view import *
+from pylayout.viewer.model import *
+from pylayout.viewer.view import *
 
 import os
 

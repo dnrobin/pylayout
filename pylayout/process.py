@@ -1,9 +1,3 @@
-from pylayout.utils import *
-from pylayout.core import *
-
-import os
-import re
-import xmltodict
 
 class Rule:
     def __init__(self, name, value, doc, layer=None):
@@ -129,7 +123,7 @@ class ProcessLayers:
             return self.layers[name]
         return None
 
-    def get_layer_by_info(self, layer, dtype):
+    def get_layer_by_spec(self, layer, dtype):
         for l in self.layers.values():
             if l.layer == layer and l.dtype == dtype:
                 return l
@@ -141,32 +135,3 @@ class ProcessLayers:
             if l.export:
                 layers[i] = l
         return layers
-
-
-class TraceTemplate(ParameterContainer):
-    """ defines a multilayer mask template used to define 
-        cross-section profiles available by the process (ex. metal traces or waveguides)
-    """
-    def __init__(self, **kwargs):
-        super(TraceTemplate, self).__init__(**kwargs)
-
-        self.spec = dict()
-        self.build()
-
-    def __repr__(self):
-        return self.__class__.__name__
-
-    def add(self, layer: ProcessLayer, width, offset=0):
-        if type(width) is list:
-            for i, w in enumerate(width):
-                if type(offset) is list:
-                    assert len(offset) == len(width)
-                    self.add(layer, w, offset[i])
-                else:
-                    self.add(layer, w, offset)
-        else:
-            if not layer in self.spec:
-                self.spec[layer.name] = set()
-            self.spec[layer.name].add((layer, width, offset))
-    
-    def build(self):...
