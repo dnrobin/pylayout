@@ -11,7 +11,7 @@ setup(
     ],
     author="Daniel Robin",
     author_email="daniel.robin.1@ulaval.ca",
-    description="Silicon photonics layout design library",
-    keywords="integrated silicon photonics gds gdsii",
+    description="A silicon photonicsm layout design library",
+    keywords="integrated silicon photonics gds gdsii lithography",
     url="https://github.com/robindan/pylayout/"
 )
