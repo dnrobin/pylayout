@@ -23,8 +23,8 @@ setup(
 
 install_requires=[
     "gdspy>=1.5",
-    # "numpy>=1.17",
-    # "xmltodict>=0.12"
+    "numpy>=1.17",
+    "xmltodict>=0.12"
 ]
 
 if __name__ == '__main__':
