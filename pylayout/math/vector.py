@@ -1,9 +1,9 @@
-from .common import *
-from .common import _isnumbertype    # hidden names
+from .math import __isnumbertype
+from .math import *
 
 __all__ = ["Vector"]
 
-def _isvectortype(x):
+def __isvectortype(x):
     if isinstance(x, (list, tuple)):
         return len(x) == 2
     else:
@@ -35,7 +35,7 @@ class Vector:
                 self.__x = args[0][0]
                 self.__y = args[0][1]
             else:
-                if not _isnumbertype(args[0]):
+                if not __isnumbertype(args[0]):
                     raise TypeError("Invalid type supplied to Vector() intialization")
 
                 self.__x = args[0]
@@ -58,13 +58,13 @@ class Vector:
 
     @x.setter
     def x(self, value):
-        if not _isnumbertype(value):
+        if not __isnumbertype(value):
             raise TypeError("Cannot assign non-numeric type to Vector component!")
         self.__x = x
 
     @y.setter
     def y(self, value):
-        if not _isnumbertype(value):
+        if not __isnumbertype(value):
             raise TypeError("Cannot assign non-numeric type to Vector component!")
         self.__y = y
     
@@ -102,12 +102,12 @@ class Vector:
         return Vector(self.__x - v[0], self.__y - v[1])
 
     def __mul__(self, v):
-        if not _isnumbertype(v):
+        if not __isnumbertype(v):
             raise ValueError("Invalid operand for '*' with Vector, must be a numeric scalar type.")
         return Vector(self.__x * v, self.__y * v)
 
     def __truediv__(self, v):
-        if not _isnumbertype(v):
+        if not __isnumbertype(v):
             raise ValueError("Invalid operand for '/' with Vector, must be a numeric scalar type.")
         return Vector(self.__x / v, self.__y / v)
 
@@ -122,7 +122,7 @@ class Vector:
         return Vector(v[0] - self.__x, v[1] - self.__y)
 
     def __rmul__(self, v):
-        if not _isnumbertype(v):
+        if not __isnumbertype(v):
             raise ValueError("Invalid operand for '*' with Vector, must be a numeric scalar type.")
         return Vector(self.__x * v, self.__y * v)
 
@@ -153,14 +153,14 @@ class Vector:
         return self
 
     def __imul__(self, v):
-        if not _isnumbertype(v):
+        if not __isnumbertype(v):
             raise ValueError("Invalid operand for '*' with Vector, must be a numeric scalar type.")
         self.__x *= v
         self.__y *= v
         return self
 
     def __itruediv__(self, v):
-        if not _isnumbertype(v):
+        if not __isnumbertype(v):
             raise ValueError("Invalid operand for '/' with Vector, must be a numeric scalar type.")
         self.__x /= v
         self.__y /= v
@@ -252,7 +252,7 @@ class Vector:
     
     def lerp(self, a, b, t):
         """ linearly interpolate this vector from a to b using parameter t[0,1] """
-        assert _isvectortype(a) and _isvectortype(b) and _isnumbertype(t)
+        assert _isvectortype(a) and _isvectortype(b) and __isnumbertype(t)
 
         t = clamp(float(t), 0.0, 1.0)
         self.__x = (1 - t)*a.x + t*b.x
@@ -261,7 +261,7 @@ class Vector:
 
     def trim(self, d):
         """ set vector length to d preserving direction """
-        assert _isnumbertype(d)
+        assert __isnumbertype(d)
         v = self.normalize() * d
         self.__x = v[0]
         self.__y = v[1]
@@ -281,7 +281,7 @@ class Vector:
             self.__x *= factor[0]
             self.__y *= factor[1]
         else:
-            assert _isnumbertype(factor)
+            assert __isnumbertype(factor)
             self.__x *= factor
             self.__y *= factor
         
@@ -293,7 +293,7 @@ class Vector:
             self.__x += d[0]
             self.__y += d[1]
         else:
-            assert _isnumbertype(d)
+            assert __isnumbertype(d)
             if dy is None:  # translate in the vector direction
                 self.__x += sqrt(d)
                 self.__y += sqrt(d)
@@ -305,7 +305,7 @@ class Vector:
 
     def rotate(self, angle):
         """ apply ccw rotation by angle in *degrees* """
-        assert _isnumbertype(angle)
+        assert __isnumbertype(angle)
         a = radians(angle)
         c = cos(a)
         s = sin(a)

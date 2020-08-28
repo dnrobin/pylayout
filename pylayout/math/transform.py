@@ -1,6 +1,6 @@
-from .common import *
-from .vector import Vector, _isvectortype
-from .common import _isnumbertype    # hidden names
+from .vector import Vector, __isvectortype
+from .math import __isnumbertype
+from .math import *
 
 __all__ = ["Transform"]
 
@@ -25,7 +25,7 @@ class Transform:
             rotation - number, angle in *degrees*
             translation - vector-like, translation (dx, dy)
         """
-        if not _isvectortype(translation):
+        if not __isvectortype(translation):
             raise TypeError("'translation' must be a valid vector type")
 
         self.setTransform(scale, 
@@ -49,7 +49,7 @@ class Transform:
             return [self.apply(p) for p in xy]
         
         print(xy)
-        assert(_isvectortype(xy))
+        assert(__isvectortype(xy))
 
         q = xy[0] * self.ax + xy[1] * self.ay
 
@@ -86,27 +86,27 @@ class Transform:
 
     @translation.setter
     def translation(self,value):
-        assert(_isvectortype(value))
+        assert(__isvectortype(value))
         self.__translation = Vector(value)
 
     @rotation.setter
     def rotation(self,value):
-        assert(_isnumbertype(value))
+        assert(__isnumbertype(value))
         self.__rotation = radians(value)
 
     @scale.setter
     def scale(self,value):
-        assert _isnumbertype(value) or _isvectortype(value)
+        assert __isnumbertype(value) or __isvectortype(value)
         self.__scale = Vector(value)
 
     @scale.setter
     def scaleX(self,value):
-        assert _isnumbertype(value)
+        assert __isnumbertype(value)
         self.__scale.x = value
 
     @scale.setter
     def scaleY(self,value):
-        assert _isnumbertype(value)
+        assert __isnumbertype(value)
         self.__scale.y = value
 
     @property

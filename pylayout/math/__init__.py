@@ -1,8 +1,5 @@
-from .functions import *
-from .transform import Transform
+from .math import *
 from .vector import Vector
+from .transform import Transform
 
-__all__ = [
-    "Vector",
-    "Transform"
-]
+__all__ = []
