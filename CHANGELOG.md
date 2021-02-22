@@ -5,18 +5,21 @@ All changes to the pylayout codebase are documented in this file.
 ### Added
 - initial release with wrapper functions around gdspy
 - sample waveguide generation feature with automatic bends
-- attempt at writing an autorouter
+- (alpha) simple heuristic based autorouter
 
-## [1.0.0] - 2020-03-18
-### Removed
-- everything
+## [0.4.0] - 2020-03-18
+### Changed
+- most of the codebase has undergone significant modifications
 ### Added
 - complete framework that wraps around gdspy v1.5.2
-- the framework includes: math, geometry, component hierarchy and routing
+- the framework includes: math, geometry, process specification, component hierarchy and routing
 - the component builder model is helpful for writing generic component scripts with user defined values
-- the framework includes a (work in progress) full fledged viewer written in Qt5
+- the framework now includes a minimal Qt5 viewer
 
-## [2.0.0] - 2020-08-30
-## Added
+## [1.0.0] - 2021-02-22
 ## Changed
+- the codebase has undergone significant modifications to fix many issues primarely with the layout architecture
 ## Removed
+## Added
+- math functions for computational geometry
+- A-star heuristic for routing
