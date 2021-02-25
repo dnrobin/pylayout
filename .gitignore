@@ -130,3 +130,10 @@ dmypy.json
 
 # OSX dir pref files
 .DS_Store
+
+# VSCode
+.vscode
+
+# other
+.gds
+.oas
