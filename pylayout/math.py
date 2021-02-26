@@ -3,19 +3,24 @@ from types import LambdaType
 import math, numbers
 
 __all__ = (
-    'wrap_angle',
+    'isnumber',
+    'wrapangle',
     'pol_eval',
     'linspace',
+    'adaptlinspace',
     'circle_from_two_points',
     'circle_from_three_points',
+    'cubic_bezier',
     'Vec',
     'Transform'
+    'Range',
+    'BoundingBox'
 )
 
 def isnumber(type):
     return isinstance(type, numbers.Number)
 
-def wrap_angle(angle):
+def wrapangle(angle):
     """ wrap angle within 0 and 2*pi """
     _, i = math.modf(angle / (2*math.pi))
     a = angle - i*(2*math.pi)
@@ -242,31 +247,32 @@ class Vec:
 
 
 class Range:
+    """
+        Value range construct for set theoretic operations
+    """
     __slots__ = ('a', 'b')
-    def __init__(self, a=-1, b=+1):
-        if isinstance(a, (list, tuple, Range)):
-            self.a = min(a)
-            self.b = max(a)
-        else:
-            assert(isnumber(a))
-            self.a = min(a, b)
-            assert(isnumber(b))
-            self.b = max(a, b)
+    def __init__(self, a=math.nan, b=math.nan):
+        self.a = a
+        self.b = b
 
     @property
     def min(self):
+        """ get minimum value of range [a,b] """
         return self.a
 
     @property
     def max(self):
+        """ get maximum value of range [a,b] """
         return self.b
 
     @property
     def center(self):
+        """ get center value (mean) of range [a,b] """
         return (self.a + self.b) / 2
 
     @property
     def extent(self):
+        """ get extent (length) of range [a,b] """
         return self.b - self.a
 
     def __str__(self):
@@ -296,161 +302,211 @@ class Range:
         yield self.a
         yield self.b
 
-    def is_inside(self, other):
-        if isnumber(other):
-            return other > self.a and other < self.b
-        
-        if isinstance(other, Range):
-            return other.a > self.a and other.b < self.b
+    def includes(self, value):
+        """ returns true if other is included in range [a,b] """
+        # TODO: compare within tolerance radius
+        if isinstance(value, Range):
+            return value.a >= self.a and value.b <= self.b
 
-    def distance(self, x):
-        if x < self.a:
-            if isinstance(x, Range):
-                return self.a - max(x)
-            return self.a - x
+        assert isnumber(value)
+        return value >= self.a and value <= self.b
 
-        elif x > self.b:
-            if isinstance(x, Range):
-                return min(x) - self.b
-            return x - self.b
+    def excludes(self, value):
+        """ returns true if other is strictly outside range [a,b] """
+        return not self.include(value)
+
+    def distance(self, value):
+        """ compute the absolute distance between value and range [a,b] """
+        if value < self.a:
+            if isinstance(value, Range):
+                return self.a - max(value)
+            return self.a - value
+
+        elif value > self.b:
+            if isinstance(value, Range):
+                return min(value) - self.b
+            return value - self.b
 
         return 0
 
-    @classmethod
-    def bound_values(self, values):
-        a = +math.inf
-        b = -math.inf
-        for v in values:
-            if v > b:
-                b = v
-            elif v < a:
-                a = v
-        return Range(a, b)
+    def include(self, value):
+        """ stretch range (if necessary) to include value """
+        if math.isnan(self.a):
+            if isinstance(value, Range):
+                self.a = value.a
+            else:
+                assert isnumber(value)
+                self.a = value
 
-    def include(self, values):
-        if not type(values) is list:
-            values = [values]
-        for v in values:
-            if v > self.b:
-                self.b = v
-            elif v < self.a:
-                self.a = v
+        if math.isnan(self.b):
+            if isinstance(value, Range):
+                self.b = value.b
+            else:
+                assert isnumber(value)
+                self.b = value
+
+        if isinstance(value, Range):
+            if value.a < self.a: self.a = value.a
+            if value.b > self.b: self.b = value.b
+
+        else:
+            assert isnumber(value)
+            if value < self.a: self.a = value
+            if value > self.b: self.b = value
+
+        return self
+
+    def bound(self, values):
+        """ adjust range to bound set of values """
+        self.a = math.nan
+        self.b = math.nan
+        
+        for value in values:
+            self.include(value)
+        
+        return self
 
 
 class BoundingBox:
-    """ X-Y bounding box construct
-
-    Can be constructed to fit the bounds of a list of points. Features intersection routines.
-    """
+    """ Axis aligned bounding box construct for set theoretic operations on points """
     __slots__ = ('__xrange', '__yrange')
-    def __init__(self, ll=(0,0), ur=(0,0)):
-        self.__xrange = Range(ll[0], ur[0])
-        self.__yrange = Range(ll[1], ur[1])
+    def __init__(self, xmin=math.nan, xmax=math.nan, ymin=math.nan, ymax=math.nan):
+        self.__xrange = Range(xmin, xmax)
+        self.__yrange = Range(ymin, ymax)
 
     def __str__(self):
-        return "min: ({:.2f}, {:.2f}) max: ({:.2f}, {:.2f})".format(
-            self.__xrange.min, self.__xrange.max, self.__yrange.min, self.__yrange.max)
+        return f"BoundingBox(ll:({self.__xrange.min},{self.__yrange.min}), ur:({self.__xrange.max},{self.__yrange.max}))"
 
     @property
     def xmin(self):
+        """ get minimum x value """
         return self.__xrange.min
 
     @property
     def xmax(self):
+        """ get maximum x value """
         return self.__xrange.max
 
     @property
     def ymin(self):
+        """ get minimum y value """
         return self.__yrange.min
 
     @property
     def ymax(self):
+        """ get maximum y value """
         return self.__yrange.max
+
+    @property
+    def xrange(self):
+        """ extract x range as Range() """
+        return self.__xrange
+
+    @property
+    def yrange(self):
+        """ extract y range as Range() """
+        return self.__yrange
     
     @property
     def center(self):
+        """ get the center point """
         return Vec(self.__xrange.center, self.__yrange.center)
     
     @property
     def left(self):
+        """ get the left center point """
         return Vec(self.__xrange.min, self.__yrange.center)
     
     @property
     def right(self):
+        """ get the right center point """
         return Vec(self.__xrange.max, self.__yrange.center)
     
     @property
     def top(self):
+        """ get the top center point """
         return Vec(self.__xrange.center, self.__yrange.max)
     
     @property
     def bottom(self):
+        """ get the bottom center point """
         return Vec(self.__xrange.center, self.__yrange.min)
     
     @property
     def ll(self):
+        """ get the lower left corner point """
         return Vec(self.__xrange.min, self.__yrange.min)
     
     @property
     def lr(self):
+        """ get the lower right corner point """
         return Vec(self.__xrange.max, self.__yrange.min)
     
     @property
     def ul(self):
+        """ get the upper left corner point """
         return Vec(self.__xrange.min, self.__yrange.max)
 
     @property
     def ur(self):
+        """ get the upper right corner point """
         return Vec(self.__xrange.max, self.__yrange.max)
 
     @property
     def width(self):
+        """ get the box width """
         return self.__xrange.extent
     
     @property
     def height(self):
+        """ get the box height """
         return self.__yrange.extent
 
     @property
     def size(self):
+        """ return the x and y dimension tuple """
         return (self.width, self.height)
     
     @property
     def area(self):
+        """ obtain the box area """
         return self.width * self.height
 
-    @classmethod
-    def fit(points):
-        xrange = Range.bound_values([p[0] for p in points])
-        yrange = Range.bound_values([p[1] for p in points])
-        return BoundingBox((xrange.min, yrange.min), (xrange.max, yrange.max))
-
-    def include(self, points):
-        if not type(points) is list:
-            points = [points]
+    def include(self, point):
+        """ resize box (if necessary) to include point """
+        if isinstance(point, BoundingBox):
+            self.__xrange.include(point.xrange)
+            self.__yrange.include(point.yrange)
         
-        self.__xrange.include([p[0] for p in points])
-        self.__yrange.include([p[1] for p in points])
+        else:
+            self.__xrange.include(point[0])
+            self.__yrange.include(point[1])
 
-    def get_xrange(self):
-        return self.__xrange
+        return self
 
-    def get_yrange(self):
-        return self.__yrange
+    def bound(self, points):
+        """ adjust box to bound a set of points """
+        self.__xrange = Range()
+        self.__yrange = Range()
+        for point in points:
+            self.include(point)
+
+        return self
     
-    def is_inside(self, other):
-        if isinstance(other, (list, tuple, Vec)):
-            return self.__xrange.is_inside(other[0]) and self.__yrange.is_inside(other[1])
-        
-        if isinstance(other, BoundingBox):
-            return other.xmin > self.xmin and other.xmax < self.xmax and other.ymin > self.ymin and other.ymax < self.ymax
-    
-    def is_overlapping(self, other):
+    def includes(self, other):
+        # TODO: true if completely inside
+        pass
+
+    def overlaps(self, other):
         # TODO: true if partly inside or completely inside
         pass
 
+    def excludes(self, other):
+        # TODO: true if completely outside
+        pass
+
     def distance(self, other):
-        # TODO: distance is zero if inside, greater than zero if outside comparing edges
+        # TODO: distance is zero if inside, greater than zero if outside comparing nearest edge distance
         pass    
             
 
@@ -474,7 +530,7 @@ class Transform:
             raise ValueError("Translation must be a vector type (dx,dy)!")
 
         self.__translation = Vec(scale)
-        self.__rotation = wrap_angle(rotation)
+        self.__rotation = wrapangle(rotation)
         self.__scale = Vec(scale)
 
     def __mul__(self, other):
@@ -496,38 +552,45 @@ class Transform:
 
     @property
     def x(self):
+        """ get translation x coordinate """
         return self.__translation.x
 
     @property
     def y(self):
+        """ get translation y coordinate """
         return self.__translation.y
 
     @property
     def translation(self):
+        """ get translation vector """
         return self.__translation
 
     @property
     def rotation(self):
+        """ get rotation value in *radians* """
         return self.__rotation
 
     @property
     def scale(self):
+        """ get scale vector (scale x and y) """
         return self.__scale
 
     def assign(self, other):
+        """ set transform to equal other transform """
         assert isinstance(other, Transform)
         self.__translation.set(other.__translation.x, other.__translation.y)
         self.__rotation = other.__rotation
         self.__scale.set(other.__scale.x, other.__scale.y)
         
     def transform(self, translation=None, rotation=None, scale=None):
+        """ apply transformation to transform """
         if isinstance(translation, Transform):
             self.resize(translation.scale)
             self.rotate(translation.rotation)
             self.translate(translation.translation)
         else:
             if not translation is None:
-                self.translation(translation)
+                self.translate(translation)
             if rotation:
                 self.rotate(rotation)
             if scale:
@@ -536,15 +599,19 @@ class Transform:
         return self
     
     def flipH(self):
+        """ reflect transform about the y axis """
         self.__scale.x *= -1
 
     def flipV(self):
+        """ reflect transform about the x axis """
         self.__scale.y *= -1
 
     def flip(self):
+        """ reflect transform about the 45 degree axis """
         self.__scale *= -1
 
     def translate(self, dx, dy=None):
+        """ apply translation vector """
         if isinstance(dx, (list, tuple, Vec)):
             self.__translation.x = dx[0]
             self.__translation.y = dx[1]
@@ -555,12 +622,15 @@ class Transform:
             self.__translation.y = dy
 
     def rotate(self, angle):
-        self.__rotation = wrap_angle(angle)
+        """ apply rotation in *radians* """
+        self.__rotation = wrapangle(angle)
 
     def resize(self, scale):
+        """ apply scale factor (both x and y or seperately if tuple)"""
         self.__scale = Vec(scale)
 
     def reset(self):
+        """ reset transform to the identity """
         self.__translation = Vec()
         self.__rotation = 0.0
         self.__scale = Vec(1.0)

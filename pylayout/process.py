@@ -1,10 +1,8 @@
-
-class Parameter:
-    """ generic process paremeter """
-    __slots__ = ('name', 'value', 'docstring')
-    def __init__(self, name, value, docstring=''):
-        pass
-
+__all__ = (
+    'Layer',
+    'Process',
+    'GENERIC'
+)
 
 class Layer:
     """ process layer for the specification of lithographic mask """
@@ -39,10 +37,7 @@ class Process:
 
 
 # Default process provided with the library
-
 GENERIC = Process('Generic Technology')
-# GENERIC.defineCustomParemeter('MinFeatureSize', 0.100)
-# GENERIC.defineCustomParemeter('MinSpacing', 0.120)
 GENERIC.define('Si',    1,  0, 'Silicon device layer')
 GENERIC.define('Etch',  1,  1, 'Negative resist etch mask')
 GENERIC.define('N++',   10, 0, 'N-doped semiconducter')

@@ -1,6 +1,27 @@
 from .math import *
 from .math import math as math
 
+__all__ = (
+    'Circle',
+    'Circle2P',
+    'Circle3P',
+    'Cross',
+    'Ellipse',
+    'Ngon',
+    'Rect',
+    'RectC',
+    'RectWH',
+    'Sector',
+    'SectorT',
+    'Shape',
+    'Square',
+    'Taper',
+    'TaperQ',
+    'Torus',
+    'Path',
+    'Text'
+)
+
 class Shape:
     """ Base class for geometric shapes which translate to simple polygons """
     __slots__ = ('xy')
@@ -11,7 +32,7 @@ class Shape:
         import copy
         return copy.deepcopy(self)
 
-    def transform(self, translation=(0,0), scale=1.0, rotation=0.0, flipH=False):
+    def transform(self, translation=(0,0), rotation=0.0, scale=1.0, flipH=False):
         dx, dy = translation
         angle = math.radians(rotation)
         
@@ -203,9 +224,17 @@ class Taper(Shape):
 class TaperQ(Shape):
     """ Quadratic taper implementation based off of DOI: 10.1364/OPEX.13.007748 """
     def __init__(self, w1=2.0, w2=0.5, alpha=0.5, length=10, tol=.01):
-        x, y = adaptlinspace(0, length, lambda x: w1/2 + (w1 - w2)/2*(pow(1 - x/length, alpha) - 1), tol)
+        x, y = math.adaptlinspace(0, length, lambda x: w1/2 + (w1 - w2)/2*(pow(1 - x/length, alpha) - 1), tol)
         
         xy = [(c, y[i]) for i, c in enumerate(x)]
         xy.extend(reversed([(c, -y[i]) for i, c in enumerate(x)]))
 
         super().__init__(xy)
+
+
+class Path:
+    pass
+
+
+class Text:
+    pass
