@@ -1,3 +1,5 @@
+from pylayout.process import Layer
+from numpy.lib.function_base import flip
 from .mixin import ParameterType, TransformableMixin, ParameterizableMixin
 from .shape import Shape, Text, Path
 from .routing import Pin
@@ -76,11 +78,11 @@ class ComponentRef(TransformableMixin):
     def get_pin(self, key):
         if math.isnumber(key):
             if not key in self.pins.items():
-                raise KeyError(f"Invalid pin name '{key}' for component {self.name}!")
+                raise KeyError(f"invalid pin name '{key}' for component {self.name}")
             return self.pins.values()[key]
         
         if not key in self.pins:
-            raise KeyError(f"Invalid pin name '{key}' for component {self.name}!")
+            raise KeyError(f"invalid pin name '{key}' for component {self.name}!")
         
         return self.pins[key]
     
@@ -110,6 +112,9 @@ class Component:
         self.__pins = dict()
         self.__shapes = []
         self.__components = []
+
+    def __getitem__(self, key):
+        return self.get_pin(key)
 
     def place(self, name, item, position=(0,0), rotation=0.0, scale=1.0, flipH=False, params={}):
 
@@ -153,6 +158,17 @@ class Component:
 
     def get_pins(self):
         return self.__pins
+
+    def get_pin(self, key):
+        if math.isnumber(key):
+            if not key in self.__pins.values():
+                raise KeyError(f"invalid pin name '{key}' for component {self.name}")
+            return self.__pins.values()[key]
+        
+        if not key in self.__pins:
+            raise KeyError(f"invalid pin name '{key}' for component {self.name}!")
+        
+        return self.__pins[key]
     
     def get_shapes(self):
         return self.__shapes
@@ -257,3 +273,184 @@ class Builder(ParameterizableMixin):
     def after_insert(self):  pass
     def before_addpin(self): pass
     def after_addpin(self):  pass
+
+#####################################################################################################################
+#
+# ComponentLibrary
+#
+#####################################################################################################################
+
+class ComponentLibrary:
+    #
+    # TODO: import/export must be implemented correctly
+    #
+    def __init__(self, unit=1e-6, precision=1e-9):
+        self.__unit = unit
+        self.__precision = precision
+        self.components = dict()
+
+    @property
+    def unit(self):
+        return self.__unit
+
+    @property
+    def precision(self):
+        return self.__precision
+
+    def get_component(self, name):
+        if not name in self.components:
+            raise KeyError(f"component '{name}' does not exist in library")
+        return self.components[name]
+
+    def __setitem__(self, key, value):
+        if not isinstance(value, Component):
+            raise ValueError(f"cannot set item '{key}' with value that is not a component")
+        self.components[key] = value
+
+    def __getitem__(self, key):
+        if not key in self.components:
+            raise KeyError(f"component '{key}' not found in library")
+        return self.components[key]
+
+    def __delitem__(self, key):
+        if not key in self.components:
+            raise KeyError(f"component '{key}' not found in library")
+        del self.components[key]
+
+    def __iter__(self):
+        return iter(self.components)
+
+    def __len__(self):
+        return len(self.components)
+
+    def __str__(self):
+        return "\n".join([f"{key} ['" + "', '".join(item.get_pins()) + "']\n" for key, item in self.components.items()])
+
+    def add(self, name, component: Component):
+        if not isinstance(component, Component):
+            raise ValueError("invalid argument supplied to add(), must be a component instance")
+
+        self.components[name] = component
+
+    def import_components(self, filename, name=None):
+        """ import components from GDSII file 
+        
+        input:
+            if no name is provided, imports all components found in file
+        """
+        import gdspy
+        from os.path import realpath
+
+        filename = realpath(filename)
+        with open(filename, 'rb') as infile:
+            lib = gdspy.GdsLibrary(unit=self.__unit, precision=self.__precision)
+            lib.read_gds(infile, units='convert')
+
+            # if name is None:
+            #     for cell in lib.cells.values():
+            #         self.components[cell.name] = Component(cell)
+            # else:
+            #     if not name in lib.cells:
+            #         raise KeyError("Component '%s' not found in GDS file '%s'!" % (name, filename))
+
+            #     self.components[name] = Component(lib.cells[name])
+
+
+    def export_components(self, filename, name=None):
+        """ export library to GDSII file
+
+        input:
+            if no name is provided, exports everything
+        """
+        import gdspy
+        from os.path import realpath
+
+        filename = realpath(filename)
+        with open(filename, 'wb') as outfile:
+            lib = gdspy.GdsLibrary('library', None, self.__unit, self.__precision)
+
+            # if name is None:
+            #     for comp in self.components.values():
+            #         lib.add(comp.cell, True, False, True)
+            # else:
+            #     if not name in lib.components:
+            #         raise KeyError("Missing component '%s' cannot be exported!" % name)
+
+            #     lib.add(self.components[name].cell, True, False, True)
+            
+            # lib.write_gds(outfile)
+
+
+#####################################################################################################################
+#
+# Layout
+#
+#####################################################################################################################
+
+def layout_from_component(name, comp: Component):
+    ly = Layout(name)
+
+    ly.__pins = comp.__pins.copy()
+    ly.__shapes = comp.__shapes.copy()
+    ly.__components = comp.__components.copy()
+
+    return ly
+
+class Layout(Component):
+    #
+    # TODO: import/export must be implemented correctly, consider extending ComponentLibrary?
+    #
+    __slots__ = ('name')
+    def __init__(self, name):
+        super(Layout, self).__init__()
+        self.name = name
+    
+    def place(self, name, item, position=(0,0), rotation=0.0, scale=1.0, flipH=False, params={}):
+        super().place(name, item, position, rotation, scale, flipH, params)
+    
+    def save(self, filename):
+        import gdspy
+
+        top = gdspy.Cell(self.name)
+        for ref in self.__components:
+            cell = gdspy.Cell(ref.name)
+
+            for layer, element in ref.component.get_shapes():
+                # if isinstance(element, shape.ShapeArray):
+                #     angles = element.get_rotations()
+                #     scales = element.get_scales()
+
+                #     for i, (dx, dy) in enumerate(element.get_positions()):
+                #         newshape = element.get_shape().copy()
+                #         newshape.transform((dx, dy), angles[i], scales[i])
+
+                #         element = gdspy.Polygon(newshape.xy, layer.layer, layer.dtype)
+                #         cell.add(element)
+
+                # elif isinstance(element, Path):
+                #     if element.gdspath:
+                #         path = gdspy.FlexPath(element.xy, 1, gdsii_path=True)
+                #     else:
+                #         path = gdspy.FlexPath([element.xy[0]], 1)
+                #         for i, seg in enumerate(element.get_segments()):
+                #             if seg[1][0] == 'turn':
+                #                 path.turn(seg[1][1], seg[1][2], seg[0])
+                #             elif seg[1][0] == 'bezier':
+                #                 path.bezier([seg[1][1], seg[1][2], element.xy[i+1]], seg[0])
+                #             else:
+                #                 path.segment(element.xy[i+1], seg[0])
+
+                #     cell.add(path)
+
+                if isinstance(element, Shape):
+                    element = gdspy.Polygon(element.xy, layer.layer, layer.dtype)
+                    cell.add(element)
+                    
+                else:
+                    raise ValueError("invalid element type found in component shapes")
+            
+            top.add(gdspy.CellReference(cell, ref.position, ref.rotation, ref.scale, ref.flipH))
+
+        lib = gdspy.GdsLibrary()
+        lib.add(top, include_dependencies=True, overwrite_duplicate=False)
+        lib.write_gds(filename)

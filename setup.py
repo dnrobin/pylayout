@@ -2,9 +2,9 @@
 
 from setuptools import setup, find_packages
 
-import pylayout
+raise SystemError("Unreleased version cannot install!")
 
-raise SystemError("Under construction... Try again later.")
+import pylayout
 
 setup(
     name="pylayout",
